@@ -1,6 +1,20 @@
-.env
-__pycache__/
-*.pyc
-.pytest_cache/
-venv/
+# Backend
+backend/.env
+backend/__pycache__/
+backend/*.pyc
+backend/.pytest_cache/
+backend/venv/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/build/
+frontend/.env.local
+frontend/.env
+
+# IDE
 .vscode/
+.idea/
+
+# System
+.DS_Store

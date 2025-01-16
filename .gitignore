@@ -8,13 +8,14 @@ backend/venv/
 # Frontend
 frontend/node_modules/
 frontend/.next/
+frontend/out/
 frontend/build/
 frontend/.env.local
 frontend/.env
 
-# IDE
-.vscode/
-.idea/
-
-# System
+# General
 .DS_Store
+.env
+*.pem
+.vercel
+*.tsbuildinfo

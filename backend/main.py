@@ -21,19 +21,11 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Language Learning API")
 
-# Configure CORS with environment variable
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-ALLOWED_ORIGINS = [
-    FRONTEND_URL,
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://*.github.io"  # For GitHub Pages
-]
-
+# Configure CORS - Development mode (more permissive)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins in development
+    allow_credentials=False,  # Must be False for allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )

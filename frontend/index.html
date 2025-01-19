@@ -258,11 +258,17 @@
                     <option value="Chinese">Chinese</option>
                 </select>
                 <select id="voice-select" class="mb-10">
-                    <option value="cove">Cove (Default)</option>
-                    <option value="onyx">Onyx</option>
-                    <option value="echo">Echo</option>
-                    <option value="ash">Ash</option>
+                    <option value="ash">Ash (Default)</option>
                     <option value="alloy">Alloy</option>
+                    <option value="echo">Echo</option>
+                    <option value="fable">Fable</option>
+                    <option value="onyx">Onyx</option>
+                    <option value="nova">Nova</option>
+                    <option value="shimmer">Shimmer</option>
+                    <option value="coral">Coral</option>
+                    <option value="verse">Verse</option>
+                    <option value="ballad">Ballad</option>
+                    <option value="sage">Sage</option>
                 </select>
                 <button id="submit-button" onclick="handleSubmit()">Generate Card</button>
                 <div id="error-message" class="error"></div>
@@ -335,7 +341,7 @@
         const voiceSelect = document.getElementById('voice-select');
         
         // Load saved voice preference
-        const savedVoice = localStorage.getItem('selected_voice') || 'cove';
+        const savedVoice = localStorage.getItem('selected_voice') || 'ash';
         voiceSelect.value = savedVoice;
 
         // Save voice selection when changed

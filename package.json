@@ -1,0 +1,20 @@
+{
+  "name": "language-learning-app",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "frontend:dev": "cd frontend && python server.py",
+    "backend:dev": "cd backend && uvicorn main:app --reload",
+    "dev": "concurrently \"npm run frontend:dev\" \"npm run backend:dev\"",
+    "deploy:frontend": "cd frontend && gh-pages -d .",
+    "deploy:backend": "cd backend && echo 'Use Render.com dashboard to deploy'",
+    "install:all": "cd backend && pip install -r requirements.txt"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "gh-pages": "^6.1.1"
+  }
+} 

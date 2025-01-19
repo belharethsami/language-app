@@ -167,6 +167,70 @@
         .card-section p {
             margin: 5px 0;
         }
+
+        .api-key-section {
+            padding: 15px;
+        }
+
+        .api-key-section h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: var(--text-color);
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .form-group label {
+            color: var(--text-color);
+        }
+
+        .api-key-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        .save-button {
+            padding: 8px;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-color);
+            cursor: pointer;
+        }
+
+        .status-message {
+            font-size: 14px;
+            min-height: 20px;
+        }
+
+        .status-message.success {
+            color: #4CAF50;
+        }
+
+        .status-message.error {
+            color: #f44336;
+        }
+
+        .mb-10 {
+            margin-bottom: 10px;
+        }
+
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
     </style>
 </head>
 <body>
@@ -181,7 +245,7 @@
             <!-- Left Panel -->
             <div class="panel">
                 <textarea id="input-text" placeholder="Enter text here..."></textarea>
-                <select id="target-language">
+                <select id="target-language" class="mb-10">
                     <option value="English">English</option>
                     <option value="Hebrew">Hebrew</option>
                     <option value="Spanish">Spanish</option>
@@ -193,6 +257,13 @@
                     <option value="Korean">Korean</option>
                     <option value="Chinese">Chinese</option>
                 </select>
+                <select id="voice-select" class="mb-10">
+                    <option value="cove">Cove (Default)</option>
+                    <option value="onyx">Onyx</option>
+                    <option value="echo">Echo</option>
+                    <option value="ash">Ash</option>
+                    <option value="alloy">Alloy</option>
+                </select>
                 <button id="submit-button" onclick="handleSubmit()">Generate Card</button>
                 <div id="error-message" class="error"></div>
             </div>
@@ -202,16 +273,50 @@
                 <!-- Cards will be added here -->
             </div>
 
-            <!-- Right Panel - Reserved for future features -->
+            <!-- Right Panel - API Key Configuration -->
             <div class="panel">
-                <p class="text-gray-500 dark:text-gray-400 text-center">
-                    Future Features
-                </p>
+                <div class="api-key-section">
+                    <h3>Settings</h3>
+                    <div class="form-group">
+                        <label for="api-key">OpenAI API Key:</label>
+                        <input 
+                            type="password" 
+                            id="api-key" 
+                            placeholder="Enter your OpenAI API key"
+                            class="api-key-input"
+                        />
+                        <button id="save-api-key" class="save-button">Save API Key</button>
+                        <div id="api-key-status" class="status-message"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
+        // API Key Management
+        const apiKeyInput = document.getElementById('api-key');
+        const saveApiKeyButton = document.getElementById('save-api-key');
+        const apiKeyStatus = document.getElementById('api-key-status');
+
+        // Load API key from localStorage
+        apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
+
+        saveApiKeyButton.addEventListener('click', () => {
+            const apiKey = apiKeyInput.value.trim();
+            if (apiKey) {
+                localStorage.setItem('openai_api_key', apiKey);
+                apiKeyStatus.textContent = 'API key saved!';
+                apiKeyStatus.className = 'status-message success';
+                setTimeout(() => {
+                    apiKeyStatus.textContent = '';
+                }, 3000);
+            } else {
+                apiKeyStatus.textContent = 'Please enter an API key';
+                apiKeyStatus.className = 'status-message error';
+            }
+        });
+
         // Dark mode toggle
         const themeToggle = document.getElementById('theme-toggle');
         themeToggle.addEventListener('click', () => {
@@ -226,13 +331,31 @@
             }
         });
 
+        // Voice selection persistence
+        const voiceSelect = document.getElementById('voice-select');
+        
+        // Load saved voice preference
+        const savedVoice = localStorage.getItem('selected_voice') || 'cove';
+        voiceSelect.value = savedVoice;
+
+        // Save voice selection when changed
+        voiceSelect.addEventListener('change', () => {
+            localStorage.setItem('selected_voice', voiceSelect.value);
+        });
+
         async function handleSubmit() {
             const text = document.getElementById('input-text').value.trim();
             const targetLanguage = document.getElementById('target-language').value;
+            const voice = document.getElementById('voice-select').value;
             const submitButton = document.getElementById('submit-button');
             const errorMessage = document.getElementById('error-message');
+            const apiKey = localStorage.getItem('openai_api_key');
             
             if (!text) return;
+            if (!apiKey) {
+                errorMessage.textContent = 'Please enter and save your OpenAI API key first';
+                return;
+            }
 
             // Set loading state
             submitButton.disabled = true;
@@ -243,7 +366,10 @@
                 // Get translation first
                 const translationResponse = await fetch('http://localhost:8000/api/translate', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    },
                     body: JSON.stringify({ text, target_language: targetLanguage })
                 });
 
@@ -256,8 +382,11 @@
                 // Generate audio for original text
                 const audioResponse = await fetch('http://localhost:8000/api/text-to-speech', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, voice: 'alloy' })
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    },
+                    body: JSON.stringify({ text, voice })
                 });
 
                 if (!audioResponse.ok) {
@@ -269,8 +398,11 @@
                 // Generate audio for translation
                 const translationAudioResponse = await fetch('http://localhost:8000/api/text-to-speech', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: translationData.translation, voice: 'alloy' })
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    },
+                    body: JSON.stringify({ text: translationData.translation, voice })
                 });
 
                 if (!translationAudioResponse.ok) {

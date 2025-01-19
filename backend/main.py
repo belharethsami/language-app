@@ -1,11 +1,16 @@
 import base64
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 import os
 from fastapi.responses import JSONResponse
 import logging
+from typing import Optional
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -16,17 +21,22 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Language Learning API")
 
-# Configure CORS
+# Configure CORS with environment variable
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+ALLOWED_ORIGINS = [
+    FRONTEND_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://*.github.io"  # For GitHub Pages
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize OpenAI client with API key directly
-client = OpenAI(api_key="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")
 
 class TextToSpeechRequest(BaseModel):
     text: str
@@ -36,18 +46,30 @@ class TranslationRequest(BaseModel):
     text: str
     target_language: str
 
+def get_openai_client(api_key: str):
+    return OpenAI(api_key=api_key)
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Language Learning API"}
 
 @app.post("/api/text-to-speech")
-async def text_to_speech(request: TextToSpeechRequest):
+async def text_to_speech(
+    request: TextToSpeechRequest, 
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+):
     try:
+        if not x_api_key:
+            raise HTTPException(status_code=401, detail="API key is required")
+
         if not request.text.strip():
             raise ValueError("Text cannot be empty")
 
         logger.info(f"Starting text-to-speech request for text: {request.text[:50]}...")
         logger.info(f"Using voice: {request.voice}")
+        
+        # Initialize client with provided API key
+        client = get_openai_client(x_api_key)
         
         # Generate audio from text using the correct API endpoint
         logger.info("Making API request to OpenAI...")
@@ -84,13 +106,22 @@ async def text_to_speech(request: TextToSpeechRequest):
         raise HTTPException(status_code=500, detail=f"Error generating audio: {str(e)}")
 
 @app.post("/api/translate")
-async def translate(request: TranslationRequest):
+async def translate(
+    request: TranslationRequest,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+):
     try:
+        if not x_api_key:
+            raise HTTPException(status_code=401, detail="API key is required")
+
         if not request.text.strip():
             raise ValueError("Text cannot be empty")
 
         logger.info(f"Starting translation request for text: {request.text[:50]}...")
         logger.info(f"Target language: {request.target_language}")
+
+        # Initialize client with provided API key
+        client = get_openai_client(x_api_key)
 
         completion = client.chat.completions.create(
             model="gpt-4o",

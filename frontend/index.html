@@ -307,11 +307,10 @@
         </div>
     </div>
 
+    <script src="config.js"></script>
     <script>
         // API Configuration
-        const API_URL = window.location.hostname === 'localhost' 
-            ? 'http://localhost:8000'
-            : 'https://your-render-app.onrender.com'; // Replace with your Render URL
+        const API_URL = config.API_URL;
 
         // API Key Management
         const apiKeyInput = document.getElementById('api-key');

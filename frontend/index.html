@@ -169,23 +169,24 @@
         }
 
         .api-key-section {
-            padding: 15px;
-        }
-
-        .api-key-section h3 {
-            margin-top: 0;
-            margin-bottom: 15px;
-            color: var(--text-color);
+            margin-top: auto;
+            border-top: 1px solid var(--border-color);
+            padding-top: 20px;
+            box-sizing: border-box;
+            width: 100%;
         }
 
         .form-group {
             display: flex;
             flex-direction: column;
             gap: 10px;
+            box-sizing: border-box;
+            width: 100%;
         }
 
         .form-group label {
             color: var(--text-color);
+            margin-bottom: -5px;
         }
 
         .api-key-input {
@@ -195,15 +196,18 @@
             border-radius: 4px;
             background-color: var(--bg-color);
             color: var(--text-color);
+            box-sizing: border-box;
         }
 
         .save-button {
+            width: 100%;
             padding: 8px;
             background-color: var(--bg-color);
             border: 1px solid var(--border-color);
             border-radius: 4px;
             color: var(--text-color);
             cursor: pointer;
+            box-sizing: border-box;
         }
 
         .status-message {
@@ -243,46 +247,38 @@
     <div class="main-content">
         <div class="container">
             <!-- Left Panel -->
-            <div class="panel">
-                <textarea id="input-text" placeholder="Enter text here..."></textarea>
-                <select id="target-language" class="mb-10">
-                    <option value="English">English</option>
-                    <option value="Hebrew">Hebrew</option>
-                    <option value="Spanish">Spanish</option>
-                    <option value="French">French</option>
-                    <option value="German">German</option>
-                    <option value="Italian">Italian</option>
-                    <option value="Portuguese">Portuguese</option>
-                    <option value="Japanese">Japanese</option>
-                    <option value="Korean">Korean</option>
-                    <option value="Chinese">Chinese</option>
-                </select>
-                <select id="voice-select" class="mb-10">
-                    <option value="ash">Ash (Default)</option>
-                    <option value="alloy">Alloy</option>
-                    <option value="echo">Echo</option>
-                    <option value="fable">Fable</option>
-                    <option value="onyx">Onyx</option>
-                    <option value="nova">Nova</option>
-                    <option value="shimmer">Shimmer</option>
-                    <option value="coral">Coral</option>
-                    <option value="verse">Verse</option>
-                    <option value="ballad">Ballad</option>
-                    <option value="sage">Sage</option>
-                </select>
-                <button id="submit-button" onclick="handleSubmit()">Generate Card</button>
-                <div id="error-message" class="error"></div>
-            </div>
-
-            <!-- Middle Panel -->
-            <div class="panel" id="cards-container">
-                <!-- Cards will be added here -->
-            </div>
-
-            <!-- Right Panel - API Key Configuration -->
-            <div class="panel">
+            <div class="panel" style="display: flex; flex-direction: column;">
+                <div style="flex-grow: 1;">
+                    <textarea id="input-text" placeholder="Enter text here..."></textarea>
+                    <select id="target-language" class="mb-10">
+                        <option value="English">English</option>
+                        <option value="Hebrew">Hebrew</option>
+                        <option value="Spanish">Spanish</option>
+                        <option value="French">French</option>
+                        <option value="German">German</option>
+                        <option value="Italian">Italian</option>
+                        <option value="Portuguese">Portuguese</option>
+                        <option value="Japanese">Japanese</option>
+                        <option value="Korean">Korean</option>
+                        <option value="Chinese">Chinese</option>
+                    </select>
+                    <select id="voice-select" class="mb-10">
+                        <option value="ash">Ash (Default)</option>
+                        <option value="alloy">Alloy</option>
+                        <option value="echo">Echo</option>
+                        <option value="fable">Fable</option>
+                        <option value="onyx">Onyx</option>
+                        <option value="nova">Nova</option>
+                        <option value="shimmer">Shimmer</option>
+                        <option value="coral">Coral</option>
+                        <option value="verse">Verse</option>
+                        <option value="ballad">Ballad</option>
+                        <option value="sage">Sage</option>
+                    </select>
+                    <button id="submit-button" onclick="handleSubmit()">Generate Card</button>
+                    <div id="error-message" class="error"></div>
+                </div>
                 <div class="api-key-section">
-                    <h3>Settings</h3>
                     <div class="form-group">
                         <label for="api-key">OpenAI API Key:</label>
                         <input 
@@ -296,17 +292,41 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Middle Panel -->
+            <div class="panel" id="cards-container">
+                <!-- Cards will be added here -->
+            </div>
+
+            <!-- Right Panel - Reserved for future features -->
+            <div class="panel">
+                <p class="text-gray-500 dark:text-gray-400 text-center">
+                    Future Features
+                </p>
+            </div>
         </div>
     </div>
 
     <script>
+        // API Configuration
+        const API_URL = window.location.hostname === 'localhost' 
+            ? 'http://localhost:8000'
+            : 'https://your-render-app.onrender.com'; // Replace with your Render URL
+
         // API Key Management
         const apiKeyInput = document.getElementById('api-key');
         const saveApiKeyButton = document.getElementById('save-api-key');
         const apiKeyStatus = document.getElementById('api-key-status');
+        const targetLanguageSelect = document.getElementById('target-language');
 
-        // Load API key from localStorage
+        // Load saved preferences
         apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
+        targetLanguageSelect.value = localStorage.getItem('selected_language') || 'English';
+
+        // Save language selection when changed
+        targetLanguageSelect.addEventListener('change', () => {
+            localStorage.setItem('selected_language', targetLanguageSelect.value);
+        });
 
         saveApiKeyButton.addEventListener('click', () => {
             const apiKey = apiKeyInput.value.trim();
@@ -369,40 +389,42 @@
             errorMessage.textContent = '';
 
             try {
-                // Get translation first
-                const translationResponse = await fetch('http://localhost:8000/api/translate', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'X-API-Key': apiKey
-                    },
-                    body: JSON.stringify({ text, target_language: targetLanguage })
-                });
+                // Run translation and both audio generations in parallel
+                const [translationResponse, originalAudioResponse] = await Promise.all([
+                    fetch(`${API_URL}/api/translate`, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'X-API-Key': apiKey
+                        },
+                        body: JSON.stringify({ text, target_language: targetLanguage })
+                    }),
+                    fetch(`${API_URL}/api/text-to-speech`, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'X-API-Key': apiKey
+                        },
+                        body: JSON.stringify({ text, voice })
+                    })
+                ]);
 
                 if (!translationResponse.ok) {
                     const error = await translationResponse.json();
                     throw new Error(error.detail || 'Failed to translate text');
                 }
-                const translationData = await translationResponse.json();
-
-                // Generate audio for original text
-                const audioResponse = await fetch('http://localhost:8000/api/text-to-speech', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'X-API-Key': apiKey
-                    },
-                    body: JSON.stringify({ text, voice })
-                });
-
-                if (!audioResponse.ok) {
-                    const error = await audioResponse.json();
+                if (!originalAudioResponse.ok) {
+                    const error = await originalAudioResponse.json();
                     throw new Error(error.detail || 'Failed to generate audio');
                 }
-                const audioData = await audioResponse.json();
+
+                const [translationData, audioData] = await Promise.all([
+                    translationResponse.json(),
+                    originalAudioResponse.json()
+                ]);
 
                 // Generate audio for translation
-                const translationAudioResponse = await fetch('http://localhost:8000/api/text-to-speech', {
+                const translationAudioResponse = await fetch(`${API_URL}/api/text-to-speech`, {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',

@@ -39,7 +39,10 @@ class TranslationRequest(BaseModel):
     target_language: str
 
 def get_openai_client(api_key: str):
-    return OpenAI(api_key=api_key)
+    return OpenAI(
+        api_key=api_key,
+        base_url="https://api.openai.com/v1"
+    )
 
 @app.get("/")
 async def root():

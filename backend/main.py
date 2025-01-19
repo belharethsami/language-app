@@ -39,10 +39,19 @@ class TranslationRequest(BaseModel):
     target_language: str
 
 def get_openai_client(api_key: str):
-    return OpenAI(
-        api_key=api_key,
-        base_url="https://api.openai.com/v1"
-    )
+    try:
+        # Basic configuration
+        config = {
+            "api_key": api_key,
+            "base_url": "https://api.openai.com/v1",
+            "timeout": 60,  # seconds
+            "max_retries": 2
+        }
+        
+        return OpenAI(**config)
+    except Exception as e:
+        logger.error(f"Error initializing OpenAI client: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error initializing OpenAI client: {str(e)}")
 
 @app.get("/")
 async def root():

@@ -10,6 +10,8 @@
             --text-color: #000000;
             --border-color: #cccccc;
             --card-bg: #ffffff;
+            --scrollbar-thumb: #cccccc;
+            --scrollbar-track: #ffffff;
         }
 
         [data-theme="dark"] {
@@ -17,6 +19,33 @@
             --text-color: #ffffff;
             --border-color: #404040;
             --card-bg: #2d2d2d;
+            --scrollbar-thumb: #404040;
+            --scrollbar-track: #1a1a1a;
+        }
+
+        /* Webkit scrollbar styles */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--scrollbar-track);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--scrollbar-thumb);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--border-color);
+        }
+
+        /* Firefox scrollbar styles */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
         }
 
         body {

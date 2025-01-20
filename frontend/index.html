@@ -264,6 +264,58 @@
             background-color: var(--bg-color);
             color: var(--text-color);
         }
+
+        /* Mobile Responsive Styles */
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+                height: auto;
+                gap: 10px;
+            }
+
+            .panel {
+                padding: 15px;
+                margin-bottom: 10px;
+            }
+
+            .header {
+                padding: 0 10px;
+            }
+
+            .header-button {
+                padding: 6px 12px;
+                font-size: 14px;
+            }
+
+            textarea {
+                height: 100px;
+            }
+
+            .main-content {
+                padding: 70px 10px 10px;
+            }
+
+            .card {
+                padding: 12px;
+            }
+
+            /* Make audio controls more touch-friendly */
+            audio {
+                height: 40px;
+                margin: 5px 0;
+            }
+
+            /* Optimize form elements for touch */
+            select, button, .api-key-input {
+                min-height: 44px;
+                font-size: 16px;
+            }
+
+            /* Adjust spacing for mobile */
+            .mb-10 {
+                margin-bottom: 8px;
+            }
+        }
     </style>
 </head>
 <body>

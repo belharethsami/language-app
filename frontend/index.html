@@ -316,6 +316,33 @@
                 margin-bottom: 8px;
             }
         }
+
+        .audio-controls {
+            margin-top: 8px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .small-button {
+            padding: 4px 8px;
+            font-size: 12px;
+            flex: 1;
+        }
+
+        .sentence-pair {
+            margin: 10px 0;
+            padding: 8px;
+            background: var(--bg-color);
+            border-radius: 4px;
+        }
+
+        .sentence-pair p {
+            margin: 4px 0;
+        }
     </style>
 </head>
 <body>
@@ -381,11 +408,14 @@
                 <!-- Cards will be added here -->
             </div>
 
-            <!-- Right Panel - Reserved for future features -->
+            <!-- Right Panel - Export Features -->
             <div class="panel">
-                <p class="text-gray-500 dark:text-gray-400 text-center">
-                    Future Features
-                </p>
+                <div class="mb-10">
+                    <button id="export-anki" class="w-full mb-4">Export to Anki</button>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        Export all cards to Anki deck format
+                    </p>
+                </div>
             </div>
         </div>
     </div>
@@ -471,8 +501,8 @@
             errorMessage.textContent = '';
 
             try {
-                // Run translation and both audio generations in parallel
-                const [translationResponse, originalAudioResponse] = await Promise.all([
+                // Run translation, sentence generation, and audio generations in parallel
+                const [translationResponse, originalAudioResponse, sentencesResponse] = await Promise.all([
                     fetch(`${API_URL}/api/translate`, {
                         method: 'POST',
                         headers: { 
@@ -488,21 +518,25 @@
                             'X-API-Key': apiKey
                         },
                         body: JSON.stringify({ text, voice })
+                    }),
+                    fetch(`${API_URL}/api/generate-sentences`, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'X-API-Key': apiKey
+                        },
+                        body: JSON.stringify({ text, target_language: targetLanguage })
                     })
                 ]);
 
-                if (!translationResponse.ok) {
-                    const error = await translationResponse.json();
-                    throw new Error(error.detail || 'Failed to translate text');
-                }
-                if (!originalAudioResponse.ok) {
-                    const error = await originalAudioResponse.json();
-                    throw new Error(error.detail || 'Failed to generate audio');
+                if (!translationResponse.ok || !originalAudioResponse.ok || !sentencesResponse.ok) {
+                    throw new Error('Failed to generate content');
                 }
 
-                const [translationData, audioData] = await Promise.all([
+                const [translationData, audioData, sentencesData] = await Promise.all([
                     translationResponse.json(),
-                    originalAudioResponse.json()
+                    originalAudioResponse.json(),
+                    sentencesResponse.json()
                 ]);
 
                 // Generate audio for translation
@@ -516,29 +550,57 @@
                 });
 
                 if (!translationAudioResponse.ok) {
-                    const error = await translationAudioResponse.json();
-                    throw new Error(error.detail || 'Failed to generate translation audio');
+                    throw new Error('Failed to generate translation audio');
                 }
                 const translationAudioData = await translationAudioResponse.json();
 
                 // Add combined card
                 const cardHtml = `
-                    <div class="card">
+                    <div class="card" data-original="${encodeURIComponent(text)}" data-translation="${encodeURIComponent(translationData.translation)}">
                         <div class="card-section">
                             <p><strong>Original:</strong></p>
                             <p>${text}</p>
-                            <audio controls>
-                                <source src="data:audio/wav;base64,${audioData.audio_data}" type="audio/wav">
-                                Your browser does not support the audio element.
-                            </audio>
+                            <div class="audio-controls">
+                                <audio controls>
+                                    <source src="data:audio/wav;base64,${audioData.audio_data}" type="audio/wav">
+                                    Your browser does not support the audio element.
+                                </audio>
+                                <div class="button-group">
+                                    <button onclick="regenerateAudio(this, '${encodeURIComponent(text)}', false)" class="small-button">
+                                        🔄 Regenerate
+                                    </button>
+                                    <button onclick="regenerateAudio(this, '${encodeURIComponent(text)}', true)" class="small-button">
+                                        🐌 Slow Version
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                         <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
                             <p><strong>${targetLanguage}:</strong></p>
                             <p>${translationData.translation}</p>
-                            <audio controls>
-                                <source src="data:audio/wav;base64,${translationAudioData.audio_data}" type="audio/wav">
-                                Your browser does not support the audio element.
-                            </audio>
+                            <div class="audio-controls">
+                                <audio controls>
+                                    <source src="data:audio/wav;base64,${translationAudioData.audio_data}" type="audio/wav">
+                                    Your browser does not support the audio element.
+                                </audio>
+                                <div class="button-group">
+                                    <button onclick="regenerateAudio(this, '${encodeURIComponent(translationData.translation)}', false)" class="small-button">
+                                        🔄 Regenerate
+                                    </button>
+                                    <button onclick="regenerateAudio(this, '${encodeURIComponent(translationData.translation)}', true)" class="small-button">
+                                        🐌 Slow Version
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                            <p><strong>Example Sentences:</strong></p>
+                            ${sentencesData.sentences.map(sentence => `
+                                <div class="sentence-pair">
+                                    <p>${sentence.original}</p>
+                                    <p>${sentence.translated}</p>
+                                </div>
+                            `).join('')}
                         </div>
                     </div>
                 `;
@@ -555,6 +617,140 @@
                 submitButton.textContent = 'Generate Card';
             }
         }
+
+        async function regenerateAudio(button, text, slow) {
+            const apiKey = localStorage.getItem('openai_api_key');
+            if (!apiKey) {
+                alert('Please enter and save your OpenAI API key first');
+                return;
+            }
+
+            const voice = document.getElementById('voice-select').value;
+            const audioElement = button.closest('.audio-controls').querySelector('audio');
+            
+            button.disabled = true;
+            const originalText = button.textContent;
+            button.textContent = 'Generating...';
+
+            try {
+                const response = await fetch(`${API_URL}/api/text-to-speech`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    },
+                    body: JSON.stringify({ 
+                        text: decodeURIComponent(text), 
+                        voice,
+                        slow
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to generate audio');
+                }
+
+                const data = await response.json();
+                audioElement.src = `data:audio/wav;base64,${data.audio_data}`;
+                audioElement.load();
+                audioElement.play();
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to generate audio');
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
+
+        async function downloadAudioFile(base64Data, filename) {
+            // Convert base64 to blob
+            const response = await fetch(base64Data);
+            const blob = await response.blob();
+            
+            // Create download link
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        document.getElementById('export-anki').addEventListener('click', async function() {
+            const cards = document.querySelectorAll('.card');
+            const apiKey = localStorage.getItem('openai_api_key');
+            
+            if (!apiKey) {
+                alert('Please enter and save your OpenAI API key first');
+                return;
+            }
+
+            try {
+                const exportData = {
+                    cards: Array.from(cards).map(card => {
+                        const audioElements = card.querySelectorAll('audio source');
+                        const sentencePairs = card.querySelectorAll('.sentence-pair');
+                        const sentences = Array.from(sentencePairs).map(pair => {
+                            const [original, translated] = pair.querySelectorAll('p');
+                            return `${original.textContent}<br>${translated.textContent}`;
+                        }).join('<br><br>');
+
+                        // Extract base64 data from data:audio/wav;base64,XXXXX format
+                        const getBase64FromSrc = (src) => {
+                            try {
+                                return src.split('base64,')[1];
+                            } catch (e) {
+                                console.error('Error extracting base64:', e);
+                                return '';
+                            }
+                        };
+
+                        return {
+                            original: decodeURIComponent(card.dataset.original),
+                            translation: decodeURIComponent(card.dataset.translation),
+                            sentences: sentences,
+                            original_audio: getBase64FromSrc(audioElements[0].src),
+                            translation_audio: getBase64FromSrc(audioElements[1].src)
+                        };
+                    })
+                };
+
+                const response = await fetch(`${API_URL}/api/export-anki`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    },
+                    body: JSON.stringify(exportData)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Failed to create Anki package');
+                }
+
+                // Get the blob from response
+                const blob = await response.blob();
+                
+                // Create download link
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'language_cards.apkg';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                alert('Downloaded Anki package (.apkg file)\n\nTo use:\n1. Open Anki\n2. File > Import\n3. Select the downloaded .apkg file');
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to create Anki package: ' + error.message);
+            }
+        });
     </script>
 </body>
 </html>

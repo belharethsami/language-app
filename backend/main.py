@@ -77,6 +77,10 @@ async def text_to_speech(
         # Initialize client with provided API key
         client = get_openai_client(x_api_key)
         
+        # Add Arabic dialect specification for Arabic text
+        if any(c in 'ءآأؤإئابةتثجحخدذرزسشصضطظعغفقكلمنهوىيپچژکگی' for c in request.text):
+            request.text = request.text + " (باللهجة المصرية)"
+        
         # Generate audio from text using the correct API endpoint
         logger.info("Making API request to OpenAI...")
         
@@ -134,13 +138,18 @@ async def translate(
 
         # Initialize client with provided API key
         client = get_openai_client(x_api_key)
+        
+        # Add Egyptian dialect specification for Arabic
+        target_language = request.target_language
+        if target_language.lower() == "arabic":
+            target_language = "Arabic (Egyptian dialect)"
 
         completion = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4",
             messages=[
                 {
                     "role": "system",
-                    "content": f"You are a translator. Translate the following text to {request.target_language}. Provide only the translation, no explanations."
+                    "content": f"You are a translator. Translate the following text to {target_language}. Provide only the translation, no explanations."
                 },
                 {
                     "role": "user",
@@ -148,7 +157,7 @@ async def translate(
                 }
             ]
         )
-
+        
         translation = completion.choices[0].message.content.strip()
         logger.info("Successfully received translation")
         

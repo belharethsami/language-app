@@ -319,6 +319,7 @@
 
         .audio-controls {
             margin-top: 8px;
+            position: relative;
         }
 
         .button-group {
@@ -342,6 +343,114 @@
 
         .sentence-pair p {
             margin: 4px 0;
+        }
+
+        .remove-audio {
+            position: absolute;
+            right: -8px;
+            top: -8px;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+            padding: 0;
+        }
+
+        .remove-audio:hover {
+            background: #ff4444;
+            color: white;
+            border-color: #ff4444;
+        }
+
+        .switch-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 20px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            margin-top: 8px;
+            margin-bottom: 4px;
+        }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .checkbox-container input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
+
+        .checkbox-container label {
+            font-size: 0.85em;
+            color: var(--text-color);
+            opacity: 0.9;
+        }
+
+        .audio-options {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            margin: 2px 0;
         }
     </style>
 </head>
@@ -386,6 +495,20 @@
                         <option value="sage">Sage</option>
                     </select>
                     <button id="submit-button" onclick="handleSubmit()">Generate Card</button>
+                    <div class="checkbox-group">
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="generate-original-audio" checked>
+                            <label for="generate-original-audio">Generate audio for original text</label>
+                        </div>
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="generate-translation-audio">
+                            <label for="generate-translation-audio">Generate audio for translation</label>
+                        </div>
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="include-examples" checked>
+                            <label for="include-examples">Add example sentences</label>
+                        </div>
+                    </div>
                     <div id="error-message" class="error"></div>
                 </div>
                 <div class="api-key-section">
@@ -438,7 +561,26 @@
         // Save language selection when changed
         targetLanguageSelect.addEventListener('change', () => {
             localStorage.setItem('selected_language', targetLanguageSelect.value);
+            updateAudioCheckboxes();
         });
+
+        // Function to update audio checkboxes based on selected language
+        function updateAudioCheckboxes() {
+            const targetLanguage = document.getElementById('target-language').value;
+            const generateOriginalAudio = document.getElementById('generate-original-audio');
+            const generateTranslationAudio = document.getElementById('generate-translation-audio');
+
+            if (targetLanguage === 'English') {
+                generateOriginalAudio.checked = true;
+                generateTranslationAudio.checked = false;
+            } else {
+                generateOriginalAudio.checked = false;
+                generateTranslationAudio.checked = true;
+            }
+        }
+
+        // Initialize checkbox states
+        updateAudioCheckboxes();
 
         saveApiKeyButton.addEventListener('click', () => {
             const apiKey = apiKeyInput.value.trim();
@@ -466,6 +608,7 @@
         clearCardsButton.addEventListener('click', () => {
             if (confirm('Are you sure you want to clear all cards?')) {
                 document.getElementById('cards-container').innerHTML = '';
+                localStorage.removeItem('language_cards');
             }
         });
 
@@ -485,6 +628,9 @@
             const text = document.getElementById('input-text').value.trim();
             const targetLanguage = document.getElementById('target-language').value;
             const voice = document.getElementById('voice-select').value;
+            const includeExamples = document.getElementById('include-examples').checked;
+            const generateOriginalAudio = document.getElementById('generate-original-audio').checked;
+            const generateTranslationAudio = document.getElementById('generate-translation-audio').checked;
             const submitButton = document.getElementById('submit-button');
             const errorMessage = document.getElementById('error-message');
             const apiKey = localStorage.getItem('openai_api_key');
@@ -501,8 +647,8 @@
             errorMessage.textContent = '';
 
             try {
-                // Run translation, sentence generation, and audio generations in parallel
-                const [translationResponse, originalAudioResponse, sentencesResponse] = await Promise.all([
+                // Create an array of promises for the API calls
+                const apiCalls = [
                     fetch(`${API_URL}/api/translate`, {
                         method: 'POST',
                         headers: { 
@@ -510,101 +656,132 @@
                             'X-API-Key': apiKey
                         },
                         body: JSON.stringify({ text, target_language: targetLanguage })
-                    }),
-                    fetch(`${API_URL}/api/text-to-speech`, {
-                        method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            'X-API-Key': apiKey
-                        },
-                        body: JSON.stringify({ text, voice })
-                    }),
-                    fetch(`${API_URL}/api/generate-sentences`, {
-                        method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            'X-API-Key': apiKey
-                        },
-                        body: JSON.stringify({ text, target_language: targetLanguage })
                     })
-                ]);
+                ];
 
-                if (!translationResponse.ok || !originalAudioResponse.ok || !sentencesResponse.ok) {
+                // Add original audio API call if enabled
+                if (generateOriginalAudio) {
+                    apiCalls.push(
+                        fetch(`${API_URL}/api/text-to-speech`, {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'X-API-Key': apiKey
+                            },
+                            body: JSON.stringify({ text, voice })
+                        })
+                    );
+                }
+
+                // Only add sentences API call if examples are enabled
+                if (includeExamples) {
+                    apiCalls.push(
+                        fetch(`${API_URL}/api/generate-sentences`, {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'X-API-Key': apiKey
+                            },
+                            body: JSON.stringify({ text, target_language: targetLanguage })
+                        })
+                    );
+                }
+
+                // Run API calls in parallel
+                const responses = await Promise.all(apiCalls);
+                
+                if (!responses.every(response => response.ok)) {
                     throw new Error('Failed to generate content');
                 }
 
-                const [translationData, audioData, sentencesData] = await Promise.all([
-                    translationResponse.json(),
-                    originalAudioResponse.json(),
-                    sentencesResponse.json()
-                ]);
+                const [translationResponse, ...otherResponses] = await Promise.all(
+                    responses.map(response => response.json())
+                );
 
-                // Generate audio for translation
-                const translationAudioResponse = await fetch(`${API_URL}/api/text-to-speech`, {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'X-API-Key': apiKey
-                    },
-                    body: JSON.stringify({ text: translationData.translation, voice })
-                });
+                // Get original audio response if it was generated
+                const audioResponse = generateOriginalAudio ? otherResponses.shift() : null;
 
-                if (!translationAudioResponse.ok) {
-                    throw new Error('Failed to generate translation audio');
+                // Get sentences response if it was generated
+                const sentencesResponse = includeExamples ? otherResponses.shift() : null;
+
+                // Generate translation audio if enabled
+                let translationAudioData = null;
+                if (generateTranslationAudio) {
+                    const translationAudioResponse = await fetch(`${API_URL}/api/text-to-speech`, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'X-API-Key': apiKey
+                        },
+                        body: JSON.stringify({ text: translationResponse.translation, voice })
+                    });
+
+                    if (!translationAudioResponse.ok) {
+                        throw new Error('Failed to generate translation audio');
+                    }
+                    translationAudioData = await translationAudioResponse.json();
                 }
-                const translationAudioData = await translationAudioResponse.json();
 
                 // Add combined card
                 const cardHtml = `
-                    <div class="card" data-original="${encodeURIComponent(text)}" data-translation="${encodeURIComponent(translationData.translation)}">
+                    <div class="card" data-original="${encodeURIComponent(text)}" data-translation="${encodeURIComponent(translationResponse.translation)}">
                         <div class="card-section">
                             <p><strong>Original:</strong></p>
                             <p>${text}</p>
-                            <div class="audio-controls">
-                                <audio controls>
-                                    <source src="data:audio/wav;base64,${audioData.audio_data}" type="audio/wav">
-                                    Your browser does not support the audio element.
-                                </audio>
-                                <div class="button-group">
-                                    <button onclick="regenerateAudio(this, '${encodeURIComponent(text)}', false)" class="small-button">
-                                        🔄 Regenerate
-                                    </button>
-                                    <button onclick="regenerateAudio(this, '${encodeURIComponent(text)}', true)" class="small-button">
-                                        🐌 Slow Version
-                                    </button>
+                            ${generateOriginalAudio ? `
+                                <div class="audio-controls">
+                                    <button class="remove-audio" onclick="removeAudio(this)">×</button>
+                                    <audio controls>
+                                        <source src="data:audio/wav;base64,${audioResponse.audio_data}" type="audio/wav">
+                                        Your browser does not support the audio element.
+                                    </audio>
+                                    <div class="button-group">
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(text)}', false)" class="small-button">
+                                            ↻ Regenerate
+                                        </button>
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(text)}', true)" class="small-button">
+                                            >> Slow
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
+                            ` : ''}
                         </div>
                         <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
                             <p><strong>${targetLanguage}:</strong></p>
-                            <p>${translationData.translation}</p>
-                            <div class="audio-controls">
-                                <audio controls>
-                                    <source src="data:audio/wav;base64,${translationAudioData.audio_data}" type="audio/wav">
-                                    Your browser does not support the audio element.
-                                </audio>
-                                <div class="button-group">
-                                    <button onclick="regenerateAudio(this, '${encodeURIComponent(translationData.translation)}', false)" class="small-button">
-                                        🔄 Regenerate
-                                    </button>
-                                    <button onclick="regenerateAudio(this, '${encodeURIComponent(translationData.translation)}', true)" class="small-button">
-                                        🐌 Slow Version
-                                    </button>
+                            <p>${translationResponse.translation}</p>
+                            ${generateTranslationAudio ? `
+                                <div class="audio-controls">
+                                    <button class="remove-audio" onclick="removeAudio(this)">×</button>
+                                    <audio controls>
+                                        <source src="data:audio/wav;base64,${translationAudioData.audio_data}" type="audio/wav">
+                                        Your browser does not support the audio element.
+                                    </audio>
+                                    <div class="button-group">
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(translationResponse.translation)}', false)" class="small-button">
+                                            ↻ Regenerate
+                                        </button>
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(translationResponse.translation)}', true)" class="small-button">
+                                            >> Slow
+                                        </button>
+                                    </div>
                                 </div>
+                            ` : ''}
+                        </div>
+                        ${includeExamples && sentencesResponse ? `
+                            <div class="card-section example-sentences" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                                <p><strong>Example Sentences:</strong></p>
+                                ${sentencesResponse.sentences.map(sentence => `
+                                    <div class="sentence-pair">
+                                        <p>${sentence.original}</p>
+                                        <p>${sentence.translated}</p>
+                                    </div>
+                                `).join('')}
                             </div>
-                        </div>
-                        <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
-                            <p><strong>Example Sentences:</strong></p>
-                            ${sentencesData.sentences.map(sentence => `
-                                <div class="sentence-pair">
-                                    <p>${sentence.original}</p>
-                                    <p>${sentence.translated}</p>
-                                </div>
-                            `).join('')}
-                        </div>
+                        ` : ''}
                     </div>
                 `;
                 document.getElementById('cards-container').insertAdjacentHTML('afterbegin', cardHtml);
+                saveCards();
 
                 // Clear input
                 document.getElementById('input-text').value = '';
@@ -751,6 +928,35 @@
                 alert('Failed to create Anki package: ' + error.message);
             }
         });
+
+        function removeAudio(button) {
+            const audioControls = button.closest('.audio-controls');
+            audioControls.remove();
+            saveCards();
+        }
+
+        function toggleExampleSentences(checkbox) {
+            const card = checkbox.closest('.card');
+            const exampleSentences = card.querySelector('.example-sentences');
+            exampleSentences.style.display = checkbox.checked ? 'block' : 'none';
+        }
+
+        // Load saved cards
+        function loadSavedCards() {
+            const savedCards = localStorage.getItem('language_cards');
+            if (savedCards) {
+                document.getElementById('cards-container').innerHTML = savedCards;
+            }
+        }
+
+        // Save cards to localStorage
+        function saveCards() {
+            const cardsHtml = document.getElementById('cards-container').innerHTML;
+            localStorage.setItem('language_cards', cardsHtml);
+        }
+
+        // Load cards on page load
+        loadSavedCards();
     </script>
 </body>
 </html>

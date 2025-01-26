@@ -866,9 +866,26 @@
             }
 
             try {
+                console.log('Starting Anki export process...');
+                console.log('Number of cards found:', cards.length);
+                
                 const exportData = {
-                    cards: Array.from(cards).map(card => {
-                        const audioElements = card.querySelectorAll('audio source');
+                    cards: Array.from(cards).map((card, index) => {
+                        console.log(`Processing card ${index + 1}...`);
+                        
+                        // Get the original and translation sections
+                        const originalSection = card.querySelector('.card-section:first-child');
+                        const translationSection = card.querySelector('.card-section:nth-child(2)');
+                        
+                        // Get audio sources from their respective sections
+                        const originalAudioSource = originalSection.querySelector('audio source');
+                        const translationAudioSource = translationSection.querySelector('audio source');
+                        
+                        console.log(`Card ${index + 1} audio elements found:`, {
+                            hasOriginalAudio: !!originalAudioSource,
+                            hasTranslationAudio: !!translationAudioSource
+                        });
+
                         const sentencePairs = card.querySelectorAll('.sentence-pair');
                         const sentences = Array.from(sentencePairs).map(pair => {
                             const [original, translated] = pair.querySelectorAll('p');
@@ -877,6 +894,10 @@
 
                         // Extract base64 data from data:audio/wav;base64,XXXXX format
                         const getBase64FromSrc = (src) => {
+                            if (!src) {
+                                console.log('No audio source found');
+                                return '';
+                            }
                             try {
                                 return src.split('base64,')[1];
                             } catch (e) {
@@ -885,12 +906,21 @@
                             }
                         };
 
+                        // Get audio data from their respective sources
+                        const originalAudio = originalAudioSource ? getBase64FromSrc(originalAudioSource.src) : '';
+                        const translationAudio = translationAudioSource ? getBase64FromSrc(translationAudioSource.src) : '';
+
+                        console.log(`Card ${index + 1} audio status:`, {
+                            hasOriginalAudio: !!originalAudio,
+                            hasTranslationAudio: !!translationAudio
+                        });
+
                         return {
                             original: decodeURIComponent(card.dataset.original),
                             translation: decodeURIComponent(card.dataset.translation),
                             sentences: sentences,
-                            original_audio: getBase64FromSrc(audioElements[0].src),
-                            translation_audio: getBase64FromSrc(audioElements[1].src)
+                            original_audio: originalAudio,
+                            translation_audio: translationAudio
                         };
                     })
                 };

@@ -26,12 +26,16 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Language Learning API")
 
 # Configure CORS - Development mode (more permissive)
+origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins in development
-    allow_credentials=False,  # Must be False for allow_origins=["*"]
-    allow_methods=["*"],
+    allow_origins=origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 class TextToSpeechRequest(BaseModel):
@@ -145,7 +149,7 @@ async def translate(
             target_language = "Arabic (Egyptian dialect)"
 
         completion = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",

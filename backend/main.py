@@ -85,9 +85,13 @@ async def text_to_speech(
         # Initialize client with provided API key
         client = get_openai_client(x_api_key)
         
-        # Add Arabic dialect specification for Arabic text
-        if any(c in 'ءآأؤإئابةتثجحخدذرزسشصضطظعغفقكلمنهوىيپچژکگی' for c in request.text):
-            request.text = request.text + " (باللهجة المصرية)"
+        # Set dialect instructions based on language
+        dialect_instruction = ""
+        if request.language:
+            if request.language.lower() == "arabic":
+                dialect_instruction = " يرجى استخدام اللهجة المصرية."  # "Please use Egyptian dialect"
+            elif request.language.lower() == "chinese":
+                dialect_instruction = "请使用北京方言，带儿化音。"  # "Please use Beijing dialect with erhua"
         
         # Generate audio from text using the correct API endpoint
         logger.info("Making API request to OpenAI...")
@@ -95,7 +99,7 @@ async def text_to_speech(
         # Modify system prompt for slow speech if requested
         system_prompt = "You are just going to read the text sent by the user out loud. Do not say or do anything besides precisely the text shown here."
         if request.language:
-            system_prompt = f"You are just going to read the text sent by the user out loud. The following text is in {request.language}. Do not say or do anything besides precisely the text shown here. Use the correct accent for the given language."
+            system_prompt = f"You are just going to read the text sent by the user out loud. The following text is in {request.language}. Do not say or do anything besides precisely the text shown here. Use the correct accent for the given language. {dialect_instruction}"
         if request.slow:
             system_prompt += " Speak extremely slowly and clearly, enunciating each word carefully."
         
@@ -149,6 +153,10 @@ async def translate(
         # Initialize client with provided API key
         client = get_openai_client(x_api_key)
         
+        # Determine if we need to request vowel marks
+        needs_vowels = request.target_language.lower() in ["urdu"]
+        vowel_instruction = "You must include all short vowel marks/diacritics in the translation." if needs_vowels else ""
+        
         # Add Egyptian dialect specification for Arabic
         target_language = request.target_language
         if target_language.lower() == "arabic":
@@ -162,7 +170,7 @@ async def translate(
             messages=[
                 {
                     "role": "system",
-                    "content": f"""You are a translator. First detect the language of the input text, then translate it to {target_language}. Return a JSON object with two fields: 'translated_text' containing only the translation, and 'initial_language' containing the detected language name in English.
+                    "content": f"""You are a translator. First detect the language of the input text, then translate it to {target_language}. {vowel_instruction} Return a JSON object with two fields: 'translated_text' containing only the translation, and 'initial_language' containing the detected language name in English.
 
 Example input: "Bonjour le monde"
 Example response: {{"translated_text": "Hello world", "initial_language": "French"}}"""

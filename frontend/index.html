@@ -680,7 +680,7 @@
                     body: JSON.stringify({ text, target_language: targetLanguage })
                 }).then(res => res.json());
 
-                // Create an array of promises for the remaining API calls
+                // Create an array of promises for all remaining API calls
                 const apiCalls = [];
 
                 // Add original audio API call if enabled
@@ -697,11 +697,29 @@
                                 voice,
                                 language: translationResponse.initial_language 
                             })
-                        })
+                        }).then(res => res.json())
                     );
                 }
 
-                // Only add sentences API call if examples are enabled
+                // Add translation audio API call if enabled
+                if (generateTranslationAudio) {
+                    apiCalls.push(
+                        fetch(`${API_URL}/api/text-to-speech`, {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'X-API-Key': apiKey
+                            },
+                            body: JSON.stringify({ 
+                                text: translationResponse.translated_text, 
+                                voice,
+                                language: targetLanguage
+                            })
+                        }).then(res => res.json())
+                    );
+                }
+
+                // Add sentences API call if examples are enabled
                 if (includeExamples) {
                     apiCalls.push(
                         fetch(`${API_URL}/api/generate-sentences`, {
@@ -716,48 +734,18 @@
                                 translated_text: translationResponse.translated_text,
                                 initial_language: translationResponse.initial_language
                             })
-                        })
+                        }).then(res => res.json())
                     );
                 }
 
-                // Run remaining API calls in parallel
-                const responses = await Promise.all(apiCalls);
+                // Run all API calls in parallel and wait for all to complete
+                const responseData = await Promise.all(apiCalls);
                 
-                if (!responses.every(response => response.ok)) {
-                    throw new Error('Failed to generate content');
-                }
-
-                const responseData = await Promise.all(
-                    responses.map(response => response.json())
-                );
-
-                // Get original audio response if it was generated
-                const audioResponse = generateOriginalAudio ? responseData[0] : null;
-
-                // Get sentences response if it was generated
-                const sentencesResponse = includeExamples ? responseData[generateOriginalAudio ? 1 : 0] : null;
-
-                // Generate translation audio if enabled
-                let translationAudioData = null;
-                if (generateTranslationAudio) {
-                    const translationAudioResponse = await fetch(`${API_URL}/api/text-to-speech`, {
-                        method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            'X-API-Key': apiKey
-                        },
-                        body: JSON.stringify({ 
-                            text: translationResponse.translated_text, 
-                            voice,
-                            language: targetLanguage
-                        })
-                    });
-
-                    if (!translationAudioResponse.ok) {
-                        throw new Error('Failed to generate translation audio');
-                    }
-                    translationAudioData = await translationAudioResponse.json();
-                }
+                // Get responses based on which calls were made
+                let currentIndex = 0;
+                const originalAudioResponse = generateOriginalAudio ? responseData[currentIndex++] : null;
+                const translationAudioResponse = generateTranslationAudio ? responseData[currentIndex++] : null;
+                const sentencesResponse = includeExamples ? responseData[currentIndex] : null;
 
                 // Add combined card
                 const cardHtml = `
@@ -773,7 +761,7 @@
                                 <div class="audio-controls">
                                     <button class="remove-audio" onclick="removeAudio(this)">×</button>
                                     <audio controls>
-                                        <source src="data:audio/wav;base64,${audioResponse.audio_data}" type="audio/wav">
+                                        <source src="data:audio/wav;base64,${originalAudioResponse.audio_data}" type="audio/wav">
                                         Your browser does not support the audio element.
                                     </audio>
                                     <div class="button-group">
@@ -794,7 +782,7 @@
                                 <div class="audio-controls">
                                     <button class="remove-audio" onclick="removeAudio(this)">×</button>
                                     <audio controls>
-                                        <source src="data:audio/wav;base64,${translationAudioData.audio_data}" type="audio/wav">
+                                        <source src="data:audio/wav;base64,${translationAudioResponse.audio_data}" type="audio/wav">
                                         Your browser does not support the audio element.
                                     </audio>
                                     <div class="button-group">

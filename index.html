@@ -471,6 +471,7 @@
                         <option value="English">English</option>
                         <option value="Hebrew">Hebrew</option>
                         <option value="Arabic">Arabic</option>
+                        <option value="Urdu">Urdu</option>
                         <option value="Russian">Russian</option>
                         <option value="Spanish">Spanish</option>
                         <option value="French">French</option>
@@ -558,11 +559,32 @@
         apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
         targetLanguageSelect.value = localStorage.getItem('selected_language') || 'English';
 
+        // Function to save example sentences preference for current language
+        function saveExampleSentencesPreference() {
+            const targetLanguage = targetLanguageSelect.value;
+            const includeExamples = document.getElementById('include-examples').checked;
+            const preferences = JSON.parse(localStorage.getItem('example_sentences_preferences') || '{}');
+            preferences[targetLanguage] = includeExamples;
+            localStorage.setItem('example_sentences_preferences', JSON.stringify(preferences));
+        }
+
+        // Function to load example sentences preference for current language
+        function loadExampleSentencesPreference() {
+            const targetLanguage = targetLanguageSelect.value;
+            const preferences = JSON.parse(localStorage.getItem('example_sentences_preferences') || '{}');
+            const includeExamples = document.getElementById('include-examples');
+            includeExamples.checked = preferences[targetLanguage] ?? true; // Default to true if not set
+        }
+
         // Save language selection when changed
         targetLanguageSelect.addEventListener('change', () => {
             localStorage.setItem('selected_language', targetLanguageSelect.value);
             updateAudioCheckboxes();
+            loadExampleSentencesPreference(); // Load example sentences preference for new language
         });
+
+        // Save example sentences preference when changed
+        document.getElementById('include-examples').addEventListener('change', saveExampleSentencesPreference);
 
         // Function to update audio checkboxes based on selected language
         function updateAudioCheckboxes() {
@@ -581,6 +603,7 @@
 
         // Initialize checkbox states
         updateAudioCheckboxes();
+        loadExampleSentencesPreference();
 
         saveApiKeyButton.addEventListener('click', () => {
             const apiKey = apiKeyInput.value.trim();
@@ -647,17 +670,18 @@
             errorMessage.textContent = '';
 
             try {
-                // Create an array of promises for the API calls
-                const apiCalls = [
-                    fetch(`${API_URL}/api/translate`, {
-                        method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            'X-API-Key': apiKey
-                        },
-                        body: JSON.stringify({ text, target_language: targetLanguage })
-                    })
-                ];
+                // First, get the translation and language detection
+                const translationResponse = await fetch(`${API_URL}/api/translate`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    },
+                    body: JSON.stringify({ text, target_language: targetLanguage })
+                }).then(res => res.json());
+
+                // Create an array of promises for the remaining API calls
+                const apiCalls = [];
 
                 // Add original audio API call if enabled
                 if (generateOriginalAudio) {
@@ -668,7 +692,11 @@
                                 'Content-Type': 'application/json',
                                 'X-API-Key': apiKey
                             },
-                            body: JSON.stringify({ text, voice })
+                            body: JSON.stringify({ 
+                                text, 
+                                voice,
+                                language: translationResponse.initial_language 
+                            })
                         })
                     );
                 }
@@ -687,22 +715,22 @@
                     );
                 }
 
-                // Run API calls in parallel
+                // Run remaining API calls in parallel
                 const responses = await Promise.all(apiCalls);
                 
                 if (!responses.every(response => response.ok)) {
                     throw new Error('Failed to generate content');
                 }
 
-                const [translationResponse, ...otherResponses] = await Promise.all(
+                const responseData = await Promise.all(
                     responses.map(response => response.json())
                 );
 
                 // Get original audio response if it was generated
-                const audioResponse = generateOriginalAudio ? otherResponses.shift() : null;
+                const audioResponse = generateOriginalAudio ? responseData[0] : null;
 
                 // Get sentences response if it was generated
-                const sentencesResponse = includeExamples ? otherResponses.shift() : null;
+                const sentencesResponse = includeExamples ? responseData[generateOriginalAudio ? 1 : 0] : null;
 
                 // Generate translation audio if enabled
                 let translationAudioData = null;
@@ -713,7 +741,11 @@
                             'Content-Type': 'application/json',
                             'X-API-Key': apiKey
                         },
-                        body: JSON.stringify({ text: translationResponse.translation, voice })
+                        body: JSON.stringify({ 
+                            text: translationResponse.translated_text, 
+                            voice,
+                            language: targetLanguage
+                        })
                     });
 
                     if (!translationAudioResponse.ok) {
@@ -724,9 +756,13 @@
 
                 // Add combined card
                 const cardHtml = `
-                    <div class="card" data-original="${encodeURIComponent(text)}" data-translation="${encodeURIComponent(translationResponse.translation)}">
+                    <div class="card" 
+                        data-original="${encodeURIComponent(text)}" 
+                        data-translation="${encodeURIComponent(translationResponse.translated_text)}"
+                        data-initial-language="${encodeURIComponent(translationResponse.initial_language)}"
+                        data-target-language="${encodeURIComponent(targetLanguage)}">
                         <div class="card-section">
-                            <p><strong>Original:</strong></p>
+                            <p><strong>${translationResponse.initial_language}:</strong></p>
                             <p>${text}</p>
                             ${generateOriginalAudio ? `
                                 <div class="audio-controls">
@@ -748,7 +784,7 @@
                         </div>
                         <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
                             <p><strong>${targetLanguage}:</strong></p>
-                            <p>${translationResponse.translation}</p>
+                            <p>${translationResponse.translated_text}</p>
                             ${generateTranslationAudio ? `
                                 <div class="audio-controls">
                                     <button class="remove-audio" onclick="removeAudio(this)">×</button>
@@ -757,10 +793,10 @@
                                         Your browser does not support the audio element.
                                     </audio>
                                     <div class="button-group">
-                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(translationResponse.translation)}', false)" class="small-button">
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(translationResponse.translated_text)}', false)" class="small-button">
                                             ↻ Regenerate
                                         </button>
-                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(translationResponse.translation)}', true)" class="small-button">
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(translationResponse.translated_text)}', true)" class="small-button">
                                             >> Slow
                                         </button>
                                     </div>
@@ -804,6 +840,10 @@
 
             const voice = document.getElementById('voice-select').value;
             const audioElement = button.closest('.audio-controls').querySelector('audio');
+            const card = button.closest('.card');
+            const cardSection = button.closest('.card-section');
+            const isTranslation = cardSection.querySelector('strong').textContent.includes(decodeURIComponent(card.dataset.targetLanguage));
+            const language = isTranslation ? decodeURIComponent(card.dataset.targetLanguage) : decodeURIComponent(card.dataset.initialLanguage);
             
             button.disabled = true;
             const originalText = button.textContent;
@@ -819,7 +859,8 @@
                     body: JSON.stringify({ 
                         text: decodeURIComponent(text), 
                         voice,
-                        slow
+                        slow,
+                        language
                     })
                 });
 

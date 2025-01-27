@@ -670,141 +670,102 @@
             errorMessage.textContent = '';
 
             try {
-                // First, get the translation and language detection
-                const translationResponse = await fetch(`${API_URL}/api/translate`, {
+                // Make a single API call to generate everything
+                const response = await fetch(`${API_URL}/api/generate-card`, {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
                         'X-API-Key': apiKey
                     },
-                    body: JSON.stringify({ text, target_language: targetLanguage })
-                }).then(res => res.json());
+                    body: JSON.stringify({
+                        text,
+                        target_language: targetLanguage,
+                        voice,
+                        generate_original_audio: generateOriginalAudio,
+                        generate_translation_audio: generateTranslationAudio,
+                        include_examples: includeExamples
+                    })
+                });
 
-                // Create an array of promises for all remaining API calls
-                const apiCalls = [];
-
-                // Add original audio API call if enabled
-                if (generateOriginalAudio) {
-                    apiCalls.push(
-                        fetch(`${API_URL}/api/text-to-speech`, {
-                            method: 'POST',
-                            headers: { 
-                                'Content-Type': 'application/json',
-                                'X-API-Key': apiKey
-                            },
-                            body: JSON.stringify({ 
-                                text, 
-                                voice,
-                                language: translationResponse.initial_language 
-                            })
-                        }).then(res => res.json())
-                    );
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Failed to generate card');
                 }
 
-                // Add translation audio API call if enabled
-                if (generateTranslationAudio) {
-                    apiCalls.push(
-                        fetch(`${API_URL}/api/text-to-speech`, {
-                            method: 'POST',
-                            headers: { 
-                                'Content-Type': 'application/json',
-                                'X-API-Key': apiKey
-                            },
-                            body: JSON.stringify({ 
-                                text: translationResponse.translated_text, 
-                                voice,
-                                language: targetLanguage
-                            })
-                        }).then(res => res.json())
-                    );
-                }
-
-                // Add sentences API call if examples are enabled
-                if (includeExamples) {
-                    apiCalls.push(
-                        fetch(`${API_URL}/api/generate-sentences`, {
-                            method: 'POST',
-                            headers: { 
-                                'Content-Type': 'application/json',
-                                'X-API-Key': apiKey
-                            },
-                            body: JSON.stringify({ 
-                                text, 
-                                target_language: targetLanguage,
-                                translated_text: translationResponse.translated_text,
-                                initial_language: translationResponse.initial_language
-                            })
-                        }).then(res => res.json())
-                    );
-                }
-
-                // Run all API calls in parallel and wait for all to complete
-                const responseData = await Promise.all(apiCalls);
-                
-                // Get responses based on which calls were made
-                let currentIndex = 0;
-                const originalAudioResponse = generateOriginalAudio ? responseData[currentIndex++] : null;
-                const translationAudioResponse = generateTranslationAudio ? responseData[currentIndex++] : null;
-                const sentencesResponse = includeExamples ? responseData[currentIndex] : null;
+                const data = await response.json();
 
                 // Add combined card
                 const cardHtml = `
                     <div class="card" 
-                        data-original="${encodeURIComponent(text)}" 
-                        data-translation="${encodeURIComponent(translationResponse.translated_text)}"
-                        data-initial-language="${encodeURIComponent(translationResponse.initial_language)}"
-                        data-target-language="${encodeURIComponent(targetLanguage)}">
+                        data-original="${encodeURIComponent(data.original_text)}" 
+                        data-translation="${encodeURIComponent(data.translated_text)}"
+                        data-initial-language="${encodeURIComponent(data.initial_language)}"
+                        data-target-language="${encodeURIComponent(data.target_language)}">
                         <div class="card-section">
-                            <p><strong>${translationResponse.initial_language}:</strong></p>
-                            <p>${text}</p>
-                            ${generateOriginalAudio ? `
+                            <p><strong>${data.initial_language}:</strong></p>
+                            <p>${data.original_text}</p>
+                            ${data.original_audio ? `
                                 <div class="audio-controls">
                                     <button class="remove-audio" onclick="removeAudio(this)">×</button>
                                     <audio controls>
-                                        <source src="data:audio/wav;base64,${originalAudioResponse.audio_data}" type="audio/wav">
+                                        <source src="data:audio/wav;base64,${data.original_audio}" type="audio/wav">
                                         Your browser does not support the audio element.
                                     </audio>
                                     <div class="button-group">
-                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(text)}', false)" class="small-button">
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(data.original_text)}', false)" class="small-button">
                                             ↻ Regenerate
                                         </button>
-                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(text)}', true)" class="small-button">
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(data.original_text)}', true)" class="small-button">
                                             >> Slow
+                                        </button>
+                                        <button onclick="downloadAudioFile('data:audio/wav;base64,${data.original_audio}', 'original_audio.wav')" class="small-button">
+                                            ⇩ Download
                                         </button>
                                     </div>
                                 </div>
                             ` : ''}
                         </div>
                         <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
-                            <p><strong>${targetLanguage}:</strong></p>
-                            <p>${translationResponse.translated_text}</p>
-                            ${generateTranslationAudio ? `
+                            <p><strong>${data.target_language}:</strong></p>
+                            <p>${data.translated_text}</p>
+                            ${data.translation_audio ? `
                                 <div class="audio-controls">
                                     <button class="remove-audio" onclick="removeAudio(this)">×</button>
                                     <audio controls>
-                                        <source src="data:audio/wav;base64,${translationAudioResponse.audio_data}" type="audio/wav">
+                                        <source src="data:audio/wav;base64,${data.translation_audio}" type="audio/wav">
                                         Your browser does not support the audio element.
                                     </audio>
                                     <div class="button-group">
-                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(translationResponse.translated_text)}', false)" class="small-button">
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(data.translated_text)}', false)" class="small-button">
                                             ↻ Regenerate
                                         </button>
-                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(translationResponse.translated_text)}', true)" class="small-button">
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(data.translated_text)}', true)" class="small-button">
                                             >> Slow
+                                        </button>
+                                        <button onclick="downloadAudioFile('data:audio/wav;base64,${data.translation_audio}', 'translation_audio.wav')" class="small-button">
+                                            ⇩ Download
                                         </button>
                                     </div>
                                 </div>
                             ` : ''}
                         </div>
-                        ${includeExamples && sentencesResponse ? `
-                            <div class="card-section example-sentences" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
-                                <p><strong>Example Sentences:</strong></p>
-                                ${sentencesResponse.sentences.map(sentence => `
-                                    <div class="sentence-pair">
-                                        <p>${sentence.original}</p>
-                                        <p>${sentence.translated}</p>
+                        ${data.example_sentences ? `
+                            <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <p><strong>Example Sentences:</strong></p>
+                                    <div>
+                                        <input type="checkbox" checked onchange="toggleExampleSentences(this)">
+                                        <label>Show</label>
                                     </div>
-                                `).join('')}
+                                </div>
+                                <div class="example-sentences">
+                                    ${data.example_sentences.map(sentence => `
+                                        <div style="margin-top: 10px;">
+                                            <p>${sentence.original}</p>
+                                            <p>${sentence.translated}</p>
+                                        </div>
+                                    `).join('')}
+                                </div>
                             </div>
                         ` : ''}
                     </div>

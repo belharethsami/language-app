@@ -12,6 +12,7 @@ import genanki
 import tempfile
 import zipfile
 import io
+import json
 
 # Load environment variables
 load_dotenv()
@@ -42,6 +43,7 @@ class TextToSpeechRequest(BaseModel):
     text: str
     voice: str = "alloy"
     slow: bool = False
+    language: Optional[str] = None
 
 class TranslationRequest(BaseModel):
     text: str
@@ -89,9 +91,11 @@ async def text_to_speech(
         logger.info("Making API request to OpenAI...")
         
         # Modify system prompt for slow speech if requested
-        system_prompt = "You are just going to transcribe the text sent by the user. do not say or do anything besides precisely the text shown here. use the correct accent for the given language."
+        system_prompt = "You are just going to read the text sent by the user out loud. Do not say or do anything besides precisely the text shown here."
+        if request.language:
+            system_prompt = f"You are just going to read the text sent by the user out loud. The following text is in {request.language}. Do not say or do anything besides precisely the text shown here. Use the correct accent for the given language."
         if request.slow:
-            system_prompt += " Speak slowly and clearly, enunciating each word carefully."
+            system_prompt += " Speak extremely slowly and clearly, enunciating each word carefully."
         
         completion = client.chat.completions.create(
             model="gpt-4o-audio-preview",
@@ -150,10 +154,16 @@ async def translate(
 
         completion = client.chat.completions.create(
             model="gpt-4o",
+            response_format={
+                "type": "json_object"
+            },
             messages=[
                 {
                     "role": "system",
-                    "content": f"You are a translator. Translate the following text to {target_language}. Provide only the translation, no explanations."
+                    "content": f"""You are a translator. First detect the language of the input text, then translate it to {target_language}. Return a JSON object with two fields: 'translated_text' containing only the translation, and 'initial_language' containing the detected language name in English.
+
+Example input: "Bonjour le monde"
+Example response: {{"translated_text": "Hello world", "initial_language": "French"}}"""
                 },
                 {
                     "role": "user",
@@ -162,15 +172,19 @@ async def translate(
             ]
         )
         
-        translation = completion.choices[0].message.content.strip()
-        logger.info("Successfully received translation")
+        response = completion.choices[0].message.content.strip()
+        logger.info("Successfully received translation and language detection")
         
-        return JSONResponse(content={
-            "translation": translation
-        })
+        # Parse the JSON response from GPT
+        result = json.loads(response)
+        
+        return JSONResponse(content=result)
     except ValueError as e:
         logger.error(f"ValueError in translation: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing GPT response as JSON: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error processing translation response")
     except Exception as e:
         logger.error(f"Unexpected error in translation: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error translating text: {str(e)}")
@@ -268,21 +282,26 @@ async def export_anki(request: AnkiExportRequest):
             
             # Process each card
             for i, card_data in enumerate(request.cards, 1):
-                # Save audio files
-                orig_audio_filename = f'audio_original_{i}.wav'
-                trans_audio_filename = f'audio_translated_{i}.wav'
+                orig_audio_field = ''
+                trans_audio_field = ''
                 
-                # Save original audio
-                orig_audio_path = os.path.join(temp_dir, orig_audio_filename)
-                with open(orig_audio_path, 'wb') as f:
-                    f.write(base64.b64decode(card_data['original_audio']))
-                media_files.append((orig_audio_path, orig_audio_filename))
+                # Only process original audio if it exists
+                if card_data['original_audio']:
+                    orig_audio_filename = f'audio_original_{i}.wav'
+                    orig_audio_path = os.path.join(temp_dir, orig_audio_filename)
+                    with open(orig_audio_path, 'wb') as f:
+                        f.write(base64.b64decode(card_data['original_audio']))
+                    media_files.append((orig_audio_path, orig_audio_filename))
+                    orig_audio_field = f'[sound:{orig_audio_filename}]'
                 
-                # Save translation audio
-                trans_audio_path = os.path.join(temp_dir, trans_audio_filename)
-                with open(trans_audio_path, 'wb') as f:
-                    f.write(base64.b64decode(card_data['translation_audio']))
-                media_files.append((trans_audio_path, trans_audio_filename))
+                # Only process translation audio if it exists
+                if card_data['translation_audio']:
+                    trans_audio_filename = f'audio_translated_{i}.wav'
+                    trans_audio_path = os.path.join(temp_dir, trans_audio_filename)
+                    with open(trans_audio_path, 'wb') as f:
+                        f.write(base64.b64decode(card_data['translation_audio']))
+                    media_files.append((trans_audio_path, trans_audio_filename))
+                    trans_audio_field = f'[sound:{trans_audio_filename}]'
                 
                 # Create note
                 note = genanki.Note(
@@ -291,8 +310,8 @@ async def export_anki(request: AnkiExportRequest):
                         card_data['original'],
                         card_data['translation'],
                         card_data['sentences'],
-                        f'[sound:{orig_audio_filename}]',
-                        f'[sound:{trans_audio_filename}]'
+                        orig_audio_field,
+                        trans_audio_field
                     ]
                 )
                 deck.add_note(note)

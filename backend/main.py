@@ -52,6 +52,8 @@ class TranslationRequest(BaseModel):
 class SentenceGenerationRequest(BaseModel):
     text: str
     target_language: str
+    translated_text: str
+    initial_language: str
     num_sentences: int = 3
 
 class AnkiExportRequest(BaseModel):
@@ -211,7 +213,14 @@ async def generate_sentences(
             messages=[
                 {
                     "role": "system",
-                    "content": f"You are a language learning assistant. Create {request.num_sentences} simple, natural sentences in both languages. For each sentence, return it in this exact format: 'original: [sentence in original language]\\ntranslated: [sentence in {request.target_language}]'"
+                    "content": f"""You are a language learning assistant. Create {request.num_sentences} simple, natural sentences that use or reference the following phrase pair:
+Original phrase ({request.initial_language}): "{request.text}"
+Translated phrase ({request.target_language}): "{request.translated_text}"
+
+For each sentence, return it in this exact format:
+'original: [sentence in {request.initial_language}]\\ntranslated: [sentence in {request.target_language}]'
+
+Make sure each sentence pair naturally incorporates or references the original phrase or its translation."""
                 },
                 {
                     "role": "user",

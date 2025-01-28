@@ -78,6 +78,17 @@ class CardGenerationResponse(BaseModel):
     translation_audio: Optional[str]
     example_sentences: Optional[list[dict]]
 
+class SentenceToCardRequest(BaseModel):
+    original_text: str
+    translated_text: str
+    initial_language: str
+    target_language: str
+    voice: str = "alloy"
+    generate_original_audio: bool = True
+    generate_translation_audio: bool = True
+    include_examples: bool = True
+    num_sentences: int = 3
+
 def get_openai_client(api_key: str):
     return OpenAI(api_key=api_key)
 
@@ -513,4 +524,121 @@ Make sure each sentence pair naturally incorporates or references the original p
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error in card generation: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error generating card: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error generating card: {str(e)}")
+
+@app.post("/api/sentence-to-card")
+async def sentence_to_card(
+    request: SentenceToCardRequest,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+):
+    try:
+        if not x_api_key:
+            raise HTTPException(status_code=401, detail="API key is required")
+
+        if not request.original_text.strip() or not request.translated_text.strip():
+            raise ValueError("Both original and translated text are required")
+
+        logger.info(f"Starting sentence-to-card conversion for text: {request.original_text[:50]}...")
+        
+        # Initialize client with provided API key
+        client = get_openai_client(x_api_key)
+
+        # Initialize response data
+        response_data = {
+            "original_text": request.original_text,
+            "translated_text": request.translated_text,
+            "initial_language": request.initial_language,
+            "target_language": request.target_language,
+            "original_audio": None,
+            "translation_audio": None,
+            "example_sentences": None
+        }
+
+        # Generate audio if requested
+        if request.generate_original_audio:
+            original_audio_completion = client.chat.completions.create(
+                model="gpt-4o-audio-preview",
+                modalities=["text", "audio"],
+                audio={"voice": request.voice, "format": "wav"},
+                messages=[
+                    {
+                        "role": "system",
+                        "content": f"You are just going to read the text sent by the user out loud. The following text is in {request.initial_language}. Do not say or do anything besides precisely the text shown here."
+                    },
+                    {
+                        "role": "user",
+                        "content": request.original_text
+                    }
+                ]
+            )
+            response_data["original_audio"] = original_audio_completion.choices[0].message.audio.data
+
+        if request.generate_translation_audio:
+            translation_audio_completion = client.chat.completions.create(
+                model="gpt-4o-audio-preview",
+                modalities=["text", "audio"],
+                audio={"voice": request.voice, "format": "wav"},
+                messages=[
+                    {
+                        "role": "system",
+                        "content": f"You are just going to read the text sent by the user out loud. The following text is in {request.target_language}. Do not say or do anything besides precisely the text shown here."
+                    },
+                    {
+                        "role": "user",
+                        "content": request.translated_text
+                    }
+                ]
+            )
+            response_data["translation_audio"] = translation_audio_completion.choices[0].message.audio.data
+
+        # Generate example sentences if requested
+        if request.include_examples:
+            sentences_completion = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": f"""You are a language learning assistant. Create {request.num_sentences} simple, natural sentences that use or reference the following phrase pair:
+Original phrase ({request.initial_language}): "{request.original_text}"
+Translated phrase ({request.target_language}): "{request.translated_text}"
+
+For each sentence, return it in this exact format:
+'original: [sentence in {request.initial_language}]\\ntranslated: [sentence in {request.target_language}]'
+
+Make sure each sentence pair naturally incorporates or references the original phrase or its translation."""
+                    },
+                    {
+                        "role": "user",
+                        "content": request.original_text
+                    }
+                ]
+            )
+
+            # Parse the response into the expected format
+            response_text = sentences_completion.choices[0].message.content
+            sentences = []
+            
+            # Split into sentence pairs and parse
+            pairs = response_text.strip().split('\n\n')
+            for pair in pairs:
+                if not pair.strip():
+                    continue
+                lines = pair.strip().split('\n')
+                if len(lines) >= 2:
+                    original = lines[0].replace('original:', '').strip()
+                    translated = lines[1].replace('translated:', '').strip()
+                    sentences.append({
+                        "original": original,
+                        "translated": translated
+                    })
+            
+            response_data["example_sentences"] = sentences
+
+        return JSONResponse(content=response_data)
+
+    except ValueError as e:
+        logger.error(f"ValueError in sentence-to-card conversion: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error in sentence-to-card conversion: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error converting sentence to card: {str(e)}") 

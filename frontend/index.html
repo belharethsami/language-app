@@ -763,6 +763,9 @@
                                         <div style="margin-top: 10px;">
                                             <p>${sentence.original}</p>
                                             <p>${sentence.translated}</p>
+                                            <button onclick="convertSentenceToCard(this, '${encodeURIComponent(sentence.original)}', '${encodeURIComponent(sentence.translated)}')" class="small-button" style="width: auto; margin-top: 4px;">
+                                                Make this a card
+                                            </button>
                                         </div>
                                     `).join('')}
                                 </div>
@@ -982,6 +985,138 @@
 
         // Load cards on page load
         loadSavedCards();
+
+        async function convertSentenceToCard(button, originalText, translatedText) {
+            const apiKey = localStorage.getItem('openai_api_key');
+            if (!apiKey) {
+                alert('Please enter and save your OpenAI API key first');
+                return;
+            }
+
+            const voice = document.getElementById('voice-select').value;
+            const generateOriginalAudio = document.getElementById('generate-original-audio').checked;
+            const generateTranslationAudio = document.getElementById('generate-translation-audio').checked;
+            const includeExamples = document.getElementById('include-examples').checked;
+            const card = button.closest('.card');
+            
+            button.disabled = true;
+            button.textContent = 'Creating card...';
+
+            try {
+                const response = await fetch(`${API_URL}/api/sentence-to-card`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    },
+                    body: JSON.stringify({
+                        original_text: decodeURIComponent(originalText),
+                        translated_text: decodeURIComponent(translatedText),
+                        initial_language: decodeURIComponent(card.dataset.initialLanguage),
+                        target_language: decodeURIComponent(card.dataset.targetLanguage),
+                        voice,
+                        generate_original_audio: generateOriginalAudio,
+                        generate_translation_audio: generateTranslationAudio,
+                        include_examples: includeExamples
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Failed to create card from sentence');
+                }
+
+                const data = await response.json();
+
+                // Add the new card using the same card HTML template
+                const cardHtml = `
+                    <div class="card" 
+                        data-original="${encodeURIComponent(data.original_text)}" 
+                        data-translation="${encodeURIComponent(data.translated_text)}"
+                        data-initial-language="${encodeURIComponent(data.initial_language)}"
+                        data-target-language="${encodeURIComponent(data.target_language)}">
+                        <div class="card-section">
+                            <p><strong>${data.initial_language}:</strong></p>
+                            <p>${data.original_text}</p>
+                            ${data.original_audio ? `
+                                <div class="audio-controls">
+                                    <button class="remove-audio" onclick="removeAudio(this)">×</button>
+                                    <audio controls>
+                                        <source src="data:audio/wav;base64,${data.original_audio}" type="audio/wav">
+                                        Your browser does not support the audio element.
+                                    </audio>
+                                    <div class="button-group">
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(data.original_text)}', false)" class="small-button">
+                                            ↻ Regenerate
+                                        </button>
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(data.original_text)}', true)" class="small-button">
+                                            >> Slow
+                                        </button>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                            <p><strong>${data.target_language}:</strong></p>
+                            <p>${data.translated_text}</p>
+                            ${data.translation_audio ? `
+                                <div class="audio-controls">
+                                    <button class="remove-audio" onclick="removeAudio(this)">×</button>
+                                    <audio controls>
+                                        <source src="data:audio/wav;base64,${data.translation_audio}" type="audio/wav">
+                                        Your browser does not support the audio element.
+                                    </audio>
+                                    <div class="button-group">
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(data.translated_text)}', false)" class="small-button">
+                                            ↻ Regenerate
+                                        </button>
+                                        <button onclick="regenerateAudio(this, '${encodeURIComponent(data.translated_text)}', true)" class="small-button">
+                                            >> Slow
+                                        </button>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                        ${data.example_sentences ? `
+                            <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <p><strong>Example Sentences:</strong></p>
+                                    <div>
+                                        <input type="checkbox" checked onchange="toggleExampleSentences(this)">
+                                        <label>Show</label>
+                                    </div>
+                                </div>
+                                <div class="example-sentences">
+                                    ${data.example_sentences.map(sentence => `
+                                        <div style="margin-top: 10px;">
+                                            <p>${sentence.original}</p>
+                                            <p>${sentence.translated}</p>
+                                            <button onclick="convertSentenceToCard(this, '${encodeURIComponent(sentence.original)}', '${encodeURIComponent(sentence.translated)}')" class="small-button" style="width: auto; margin-top: 4px;">
+                                                Make this a card
+                                            </button>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+                document.getElementById('cards-container').insertAdjacentHTML('afterbegin', cardHtml);
+                saveCards();
+
+                // Show success message
+                button.textContent = 'Card created!';
+                setTimeout(() => {
+                    button.textContent = 'Make this a card';
+                    button.disabled = false;
+                }, 2000);
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to create card from sentence');
+                button.textContent = 'Make this a card';
+                button.disabled = false;
+            }
+        }
     </script>
 </body>
 </html>

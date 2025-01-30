@@ -120,8 +120,6 @@ async def text_to_speech(
         if request.language:
             if request.language.lower() == "arabic":
                 dialect_instruction = " استخدم لهجة مصرية واضحة. لهجة مصرية أصيلة."  # "Use a clear Egyptian accent. Authentically Egyptian"
-            elif request.language.lower() == "chinese":
-                dialect_instruction = "使用清晰的北京方言，带有清晰的儿化音。地道的儿化音。"  # "Use a clear Beijing dialect with clear erhua. Authentic erhua"
         
         # Generate audio from text using the correct API endpoint
         logger.info("Making API request to OpenAI...")

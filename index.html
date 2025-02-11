@@ -532,13 +532,84 @@
                 <!-- Cards will be added here -->
             </div>
 
-            <!-- Right Panel - Export Features -->
-            <div class="panel">
-                <div class="mb-10">
-                    <button id="export-anki" class="w-full mb-4">Export to Anki</button>
-                    <p class="text-sm text-gray-500 dark:text-gray-400">
-                        Export all cards to Anki deck format
-                    </p>
+            <!-- Right Panel - Import & Export Features -->
+            <div class="panel" style="display: flex; flex-direction: column;">
+                <div style="flex-grow: 1;">
+                    <button onclick="exportAllToAnki()" class="mb-10">Export All Cards to Anki</button>
+                    
+                    <input 
+                        type="file" 
+                        id="csv-file" 
+                        accept=".csv"
+                        class="hidden"
+                        onchange="handleFileSelect(event)"
+                    />
+                    <button 
+                        onclick="document.getElementById('csv-file').click()"
+                        class="mb-10"
+                    >
+                        Choose CSV File
+                    </button>
+                    <div id="file-name" class="mb-10"></div>
+
+                    <select id="csv-target-language" class="mb-10">
+                        <option value="English">English</option>
+                        <option value="Hebrew">Hebrew</option>
+                        <option value="Arabic">Arabic</option>
+                        <option value="Urdu">Urdu</option>
+                        <option value="Russian">Russian</option>
+                        <option value="Spanish">Spanish</option>
+                        <option value="French">French</option>
+                        <option value="German">German</option>
+                        <option value="Italian">Italian</option>
+                        <option value="Portuguese">Portuguese</option>
+                        <option value="Japanese">Japanese</option>
+                        <option value="Korean">Korean</option>
+                        <option value="Chinese">Chinese</option>
+                    </select>
+
+                    <select id="csv-voice-select" class="mb-10">
+                        <option value="ash">Ash (Default)</option>
+                        <option value="alloy">Alloy</option>
+                        <option value="echo">Echo</option>
+                        <option value="fable">Fable</option>
+                        <option value="onyx">Onyx</option>
+                        <option value="nova">Nova</option>
+                        <option value="shimmer">Shimmer</option>
+                        <option value="coral">Coral</option>
+                        <option value="verse">Verse</option>
+                        <option value="ballad">Ballad</option>
+                        <option value="sage">Sage</option>
+                    </select>
+
+                    <button 
+                        id="process-csv" 
+                        class="mb-10"
+                        disabled
+                        onclick="processCSV()"
+                    >
+                        Generate Cards
+                    </button>
+
+                    <div class="checkbox-group">
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="csv-has-headers">
+                            <label for="csv-has-headers">CSV has headers</label>
+                        </div>
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="csv-generate-original-audio" checked>
+                            <label for="csv-generate-original-audio">Generate audio for original text</label>
+                        </div>
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="csv-generate-translation-audio">
+                            <label for="csv-generate-translation-audio">Generate audio for translation</label>
+                        </div>
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="csv-include-examples" checked>
+                            <label for="csv-include-examples">Add example sentences</label>
+                        </div>
+                    </div>
+                    <div id="csv-error-message" class="error"></div>
                 </div>
             </div>
         </div>
@@ -854,109 +925,6 @@
             URL.revokeObjectURL(url);
         }
 
-        document.getElementById('export-anki').addEventListener('click', async function() {
-            const cards = document.querySelectorAll('.card');
-            const apiKey = localStorage.getItem('openai_api_key');
-            
-            if (!apiKey) {
-                alert('Please enter and save your OpenAI API key first');
-                return;
-            }
-
-            try {
-                console.log('Starting Anki export process...');
-                console.log('Number of cards found:', cards.length);
-                
-                const exportData = {
-                    cards: Array.from(cards).map((card, index) => {
-                        console.log(`Processing card ${index + 1}...`);
-                        
-                        // Get the original and translation sections
-                        const originalSection = card.querySelector('.card-section:first-child');
-                        const translationSection = card.querySelector('.card-section:nth-child(2)');
-                        
-                        // Get audio sources from their respective sections
-                        const originalAudioSource = originalSection.querySelector('audio source');
-                        const translationAudioSource = translationSection.querySelector('audio source');
-                        
-                        console.log(`Card ${index + 1} audio elements found:`, {
-                            hasOriginalAudio: !!originalAudioSource,
-                            hasTranslationAudio: !!translationAudioSource
-                        });
-
-                        const sentencePairs = card.querySelectorAll('.sentence-pair');
-                        const sentences = Array.from(sentencePairs).map(pair => {
-                            const [original, translated] = pair.querySelectorAll('p');
-                            return `${original.textContent}<br>${translated.textContent}`;
-                        }).join('<br><br>');
-
-                        // Extract base64 data from data:audio/wav;base64,XXXXX format
-                        const getBase64FromSrc = (src) => {
-                            if (!src) {
-                                console.log('No audio source found');
-                                return '';
-                            }
-                            try {
-                                return src.split('base64,')[1];
-                            } catch (e) {
-                                console.error('Error extracting base64:', e);
-                                return '';
-                            }
-                        };
-
-                        // Get audio data from their respective sources
-                        const originalAudio = originalAudioSource ? getBase64FromSrc(originalAudioSource.src) : '';
-                        const translationAudio = translationAudioSource ? getBase64FromSrc(translationAudioSource.src) : '';
-
-                        console.log(`Card ${index + 1} audio status:`, {
-                            hasOriginalAudio: !!originalAudio,
-                            hasTranslationAudio: !!translationAudio
-                        });
-
-                        return {
-                            original: decodeURIComponent(card.dataset.original),
-                            translation: decodeURIComponent(card.dataset.translation),
-                            sentences: sentences,
-                            original_audio: originalAudio,
-                            translation_audio: translationAudio
-                        };
-                    })
-                };
-
-                const response = await fetch(`${API_URL}/api/export-anki`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-API-Key': apiKey
-                    },
-                    body: JSON.stringify(exportData)
-                });
-
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.detail || 'Failed to create Anki package');
-                }
-
-                // Get the blob from response
-                const blob = await response.blob();
-                
-                // Create download link
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'language_cards.apkg';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-
-                alert('Downloaded Anki package (.apkg file)\n\nTo use:\n1. Open Anki\n2. File > Import\n3. Select the downloaded .apkg file');
-            } catch (error) {
-                console.error('Error:', error);
-                alert('Failed to create Anki package: ' + error.message);
-            }
-        });
-
         function removeAudio(button) {
             const audioControls = button.closest('.audio-controls');
             audioControls.remove();
@@ -1115,6 +1083,275 @@
                 alert('Failed to create card from sentence');
                 button.textContent = 'Make this a card';
                 button.disabled = false;
+            }
+        }
+
+        // CSV Processing Functions
+        let csvFile = null;
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file && file.type === 'text/csv') {
+                csvFile = file;
+                document.getElementById('file-name').textContent = file.name;
+                document.getElementById('process-csv').disabled = false;
+            } else {
+                alert('Please select a valid CSV file');
+                document.getElementById('file-name').textContent = '';
+                document.getElementById('process-csv').disabled = true;
+                csvFile = null;
+            }
+        }
+
+        async function processCSV() {
+            const apiKey = localStorage.getItem('openai_api_key');
+            if (!apiKey) {
+                alert('Please enter and save your OpenAI API key first');
+                return;
+            }
+
+            const hasHeaders = document.getElementById('csv-has-headers').checked;
+            const targetLanguage = document.getElementById('csv-target-language').value;
+            const voice = document.getElementById('csv-voice-select').value;
+            const generateOriginalAudio = document.getElementById('csv-generate-original-audio').checked;
+            const generateTranslationAudio = document.getElementById('csv-generate-translation-audio').checked;
+            const includeExamples = document.getElementById('csv-include-examples').checked;
+            const processButton = document.getElementById('process-csv');
+            const errorMessage = document.getElementById('csv-error-message');
+
+            console.log('CSV Processing started with config:', {
+                hasHeaders,
+                targetLanguage,
+                voice,
+                generateOriginalAudio,
+                generateTranslationAudio,
+                includeExamples
+            });
+
+            processButton.disabled = true;
+            processButton.textContent = 'Processing...';
+            errorMessage.textContent = '';
+
+            try {
+                const formData = new FormData();
+                formData.append('file', csvFile);
+                formData.append('request', JSON.stringify({
+                    has_headers: hasHeaders,
+                    target_language: targetLanguage,
+                    voice: voice,
+                    generate_original_audio: generateOriginalAudio,
+                    generate_translation_audio: generateTranslationAudio,
+                    include_examples: includeExamples
+                }));
+
+                console.log('Sending request to process CSV...');
+                const response = await fetch(`${API_URL}/api/process-csv`, {
+                    method: 'POST',
+                    headers: {
+                        'X-API-Key': apiKey
+                    },
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error('CSV processing failed:', errorData);
+                    throw new Error(errorData.detail || 'Failed to process CSV');
+                }
+
+                const data = await response.json();
+                console.log('Received processed cards:', data);
+                
+                // Create a container for the CSV-generated cards
+                const csvCardsContainer = document.createElement('div');
+                csvCardsContainer.className = 'csv-cards';
+                
+                // Add each card to the container
+                for (const cardData of data.cards) {
+                    if (cardData.error) {
+                        console.error('Error in card:', cardData.error);
+                        continue;
+                    }
+                    
+                    // Parse the response if it's a string
+                    let processedCard = cardData;
+                    if (typeof cardData === 'string') {
+                        try {
+                            processedCard = JSON.parse(cardData);
+                        } catch (e) {
+                            console.error('Error parsing card data:', e);
+                            continue;
+                        }
+                    }
+                    
+                    console.log('Processing card:', processedCard);
+                    
+                    // Use the same card HTML template as handleSubmit()
+                    const cardHtml = `
+                        <div class="card" 
+                            data-original="${encodeURIComponent(processedCard.original_text)}" 
+                            data-translation="${encodeURIComponent(processedCard.translated_text)}"
+                            data-initial-language="${encodeURIComponent(processedCard.initial_language)}"
+                            data-target-language="${encodeURIComponent(processedCard.target_language)}">
+                            <div class="card-section">
+                                <p><strong>${processedCard.initial_language}:</strong></p>
+                                <p>${processedCard.original_text}</p>
+                                ${processedCard.original_audio ? `
+                                    <div class="audio-controls">
+                                        <button class="remove-audio" onclick="removeAudio(this)">×</button>
+                                        <audio controls>
+                                            <source src="data:audio/wav;base64,${processedCard.original_audio}" type="audio/wav">
+                                            Your browser does not support the audio element.
+                                        </audio>
+                                        <div class="button-group">
+                                            <button onclick="regenerateAudio(this, '${encodeURIComponent(processedCard.original_text)}', false)" class="small-button">
+                                                ↻ Regenerate
+                                            </button>
+                                            <button onclick="regenerateAudio(this, '${encodeURIComponent(processedCard.original_text)}', true)" class="small-button">
+                                                >> Slow
+                                            </button>
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                            <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                                <p><strong>${processedCard.target_language}:</strong></p>
+                                <p>${processedCard.translated_text}</p>
+                                ${processedCard.translation_audio ? `
+                                    <div class="audio-controls">
+                                        <button class="remove-audio" onclick="removeAudio(this)">×</button>
+                                        <audio controls>
+                                            <source src="data:audio/wav;base64,${processedCard.translation_audio}" type="audio/wav">
+                                            Your browser does not support the audio element.
+                                        </audio>
+                                        <div class="button-group">
+                                            <button onclick="regenerateAudio(this, '${encodeURIComponent(processedCard.translated_text)}', false)" class="small-button">
+                                                ↻ Regenerate
+                                            </button>
+                                            <button onclick="regenerateAudio(this, '${encodeURIComponent(processedCard.translated_text)}', true)" class="small-button">
+                                                >> Slow
+                                            </button>
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                            ${processedCard.example_sentences ? `
+                                <div class="card-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <p><strong>Example Sentences:</strong></p>
+                                        <div>
+                                            <input type="checkbox" checked onchange="toggleExampleSentences(this)">
+                                            <label>Show</label>
+                                        </div>
+                                    </div>
+                                    <div class="example-sentences">
+                                        ${processedCard.example_sentences.map(sentence => `
+                                            <div style="margin-top: 10px;">
+                                                <p>${sentence.original}</p>
+                                                <p>${sentence.translated}</p>
+                                                <button onclick="convertSentenceToCard(this, '${encodeURIComponent(sentence.original)}', '${encodeURIComponent(sentence.translated)}')" class="small-button" style="width: auto; margin-top: 4px;">
+                                                    Make this a card
+                                                </button>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                    csvCardsContainer.insertAdjacentHTML('afterbegin', cardHtml);
+                }
+
+                // Clear any existing cards in the right panel
+                const rightPanel = document.querySelector('.panel:last-child');
+                const existingCardsContainer = rightPanel.querySelector('.csv-cards');
+                if (existingCardsContainer) {
+                    existingCardsContainer.remove();
+                }
+
+                // Add the new cards container after the controls in the right panel
+                const controlsSection = rightPanel.querySelector('div[style="flex-grow: 1;"]');
+                controlsSection.appendChild(csvCardsContainer);
+
+                // Save all cards (including the new ones)
+                saveCards();
+
+                // Reset file input
+                csvFile = null;
+                document.getElementById('file-name').textContent = '';
+                document.getElementById('process-csv').disabled = true;
+
+                console.log('CSV processing completed successfully');
+
+            } catch (error) {
+                console.error('Error in CSV processing:', error);
+                errorMessage.textContent = error.message;
+            } finally {
+                processButton.disabled = false;
+                processButton.textContent = 'Generate Cards';
+            }
+        }
+
+        async function exportAllToAnki() {
+            const allCards = Array.from(document.querySelectorAll('.card'));
+            const apiKey = localStorage.getItem('openai_api_key');
+            
+            if (!apiKey) {
+                alert('Please enter and save your OpenAI API key first');
+                return;
+            }
+
+            try {
+                const exportData = {
+                    cards: allCards.map(card => {
+                        const originalSection = card.querySelector('.card-section:first-child');
+                        const translationSection = card.querySelector('.card-section:nth-child(2)');
+                        const originalAudioSource = originalSection.querySelector('audio source');
+                        const translationAudioSource = translationSection.querySelector('audio source');
+                        const sentencePairs = card.querySelectorAll('.example-sentences > div');
+                        
+                        const sentences = Array.from(sentencePairs).map(pair => {
+                            const [original, translated] = pair.querySelectorAll('p');
+                            return `${original.textContent}<br>${translated.textContent}`;
+                        }).join('<br><br>');
+
+                        return {
+                            original: decodeURIComponent(card.dataset.original),
+                            translation: decodeURIComponent(card.dataset.translation),
+                            sentences: sentences,
+                            original_audio: originalAudioSource ? originalAudioSource.src.split('base64,')[1] : '',
+                            translation_audio: translationAudioSource ? translationAudioSource.src.split('base64,')[1] : ''
+                        };
+                    })
+                };
+
+                const response = await fetch(`${API_URL}/api/export-anki`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    },
+                    body: JSON.stringify(exportData)
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to create Anki package');
+                }
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'language_cards.apkg';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                alert('Downloaded Anki package (.apkg file)\n\nTo use:\n1. Open Anki\n2. File > Import\n3. Select the downloaded .apkg file');
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to create Anki package: ' + error.message);
             }
         }
     </script>

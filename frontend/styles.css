@@ -1,0 +1,50 @@
+.panel {
+    padding: 20px;
+    border-radius: 8px;
+    background-color: var(--panel-bg);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* CSV Import Styles */
+#csv-preview table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+#csv-preview td {
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+}
+
+#csv-cards .card {
+    position: relative;
+    margin-bottom: 16px;
+}
+
+.card-select {
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+}
+
+.card .remove-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: none;
+    border: none;
+    color: var(--text-color);
+    opacity: 0.6;
+    cursor: pointer;
+}
+
+.card .remove-button:hover {
+    opacity: 1;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    #csv-preview td {
+        border-color: var(--border-color-dark);
+    }
+} 

@@ -1,12 +1,12 @@
 import base64
-from fastapi import FastAPI, HTTPException, Header, Response
+from fastapi import FastAPI, HTTPException, Header, Response, UploadFile, File, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 import os
 from fastapi.responses import JSONResponse
 import logging
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 import genanki
 import tempfile
@@ -14,6 +14,9 @@ import zipfile
 import io
 import json
 import asyncio
+import csv
+from io import StringIO
+import random
 
 # Load environment variables
 load_dotenv()
@@ -88,6 +91,32 @@ class SentenceToCardRequest(BaseModel):
     generate_translation_audio: bool = True
     include_examples: bool = True
     num_sentences: int = 3
+
+class CSVRow(BaseModel):
+    original_text: str
+    translated_text: Optional[str]
+    is_single_column: bool
+    row_number: int
+
+class ProcessedRow(BaseModel):
+    original_text: str
+    translated_text: str
+    original_language: str
+    language_validated: bool
+    audio_generated: bool
+    has_examples: bool
+
+class CSVProcessRequest(BaseModel):
+    has_headers: bool
+    target_language: str
+    voice: Optional[str] = "alloy"
+    generate_original_audio: bool
+    generate_translation_audio: bool
+    include_examples: bool
+
+class LanguageValidationRequest(BaseModel):
+    text: str
+    expected_language: str
 
 def get_openai_client(api_key: str):
     return OpenAI(api_key=api_key)
@@ -294,8 +323,11 @@ Make sure each sentence pair naturally incorporates or references the original p
         raise HTTPException(status_code=500, detail=f"Error generating sentences: {str(e)}")
 
 @app.post("/api/export-anki")
-async def export_anki(request: AnkiExportRequest):
+async def export_anki(request: Request):
     try:
+        data = await request.json()
+        cards = data.get("cards", [])
+        
         # Create a unique model ID and deck ID
         model_id = 1607392319
         deck_id = 2059400110
@@ -326,7 +358,7 @@ async def export_anki(request: AnkiExportRequest):
             media_files = []
             
             # Process each card
-            for i, card_data in enumerate(request.cards, 1):
+            for i, card_data in enumerate(cards, 1):
                 orig_audio_field = ''
                 trans_audio_field = ''
                 
@@ -639,4 +671,190 @@ Make sure each sentence pair naturally incorporates or references the original p
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error in sentence-to-card conversion: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error converting sentence to card: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error converting sentence to card: {str(e)}")
+
+@app.post("/api/validate-language")
+async def validate_language(
+    request: LanguageValidationRequest,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+):
+    try:
+        if not x_api_key:
+            raise HTTPException(status_code=401, detail="API key is required")
+
+        if not request.text.strip():
+            raise ValueError("Text cannot be empty")
+
+        # Initialize client with provided API key
+        client = get_openai_client(x_api_key)
+
+        # Ask GPT to validate the language
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"""Determine if the following text is in {request.expected_language}. 
+Reply with a JSON object containing a single field 'matches' with value true or false.
+Example response: {{"matches": true}}"""
+                },
+                {
+                    "role": "user",
+                    "content": request.text
+                }
+            ]
+        )
+        
+        result = json.loads(completion.choices[0].message.content.strip())
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"Error validating language: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error validating language: {str(e)}")
+
+@app.post("/api/process-csv")
+async def process_csv(
+    file: UploadFile = File(...),
+    request: str = Form(...),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+):
+    try:
+        if not x_api_key:
+            raise HTTPException(status_code=401, detail="API key is required")
+
+        # Parse the request JSON
+        request_data = json.loads(request)
+        
+        # Add default values if missing
+        if 'voice' not in request_data:
+            request_data['voice'] = 'alloy'
+            
+        process_request = CSVProcessRequest(**request_data)
+        
+        # Read and process CSV
+        content = await file.read()
+        text_content = content.decode('utf-8')
+        csv_file = io.StringIO(text_content)
+        csv_reader = csv.reader(csv_file)
+        
+        # Skip headers if specified
+        if process_request.has_headers:
+            next(csv_reader)
+        
+        cards = []
+        row_number = 1
+        
+        for row in csv_reader:
+            if not row or all(cell.strip() == '' for cell in row):
+                continue
+                
+            try:
+                # Process the row into a card
+                card_data = {}
+                
+                if len(row) >= 2:
+                    # Two columns: original and translation
+                    card_data = await sentence_to_card(
+                        SentenceToCardRequest(
+                            original_text=row[0].strip(),
+                            translated_text=row[1].strip(),
+                            initial_language=await detect_language(row[0].strip(), x_api_key),
+                            target_language=process_request.target_language,
+                            voice=process_request.voice,
+                            generate_original_audio=process_request.generate_original_audio,
+                            generate_translation_audio=process_request.generate_translation_audio,
+                            include_examples=process_request.include_examples
+                        ),
+                        x_api_key
+                    )
+                    # Extract the response data directly
+                    if isinstance(card_data, JSONResponse):
+                        card_data = card_data.body
+                    cards.append(card_data)
+                else:
+                    # Single column: text to translate
+                    card_data = await generate_card(
+                        CardGenerationRequest(
+                            text=row[0].strip(),
+                            target_language=process_request.target_language,
+                            voice=process_request.voice,
+                            generate_original_audio=process_request.generate_original_audio,
+                            generate_translation_audio=process_request.generate_translation_audio,
+                            include_examples=process_request.include_examples
+                        ),
+                        x_api_key
+                    )
+                    # Extract the response data directly
+                    if isinstance(card_data, JSONResponse):
+                        card_data = card_data.body
+                    cards.append(card_data)
+
+            except Exception as e:
+                logger.error(f"Error processing row {row_number}: {str(e)}")
+                cards.append({
+                    "error": f"Error processing row {row_number}: {str(e)}",
+                    "row_number": row_number
+                })
+            
+            row_number += 1
+        
+        return {"cards": cards}
+        
+    except Exception as e:
+        logger.error(f"Error processing CSV: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+async def detect_language(text: str, api_key: str) -> str:
+    """Helper function to detect the language of a text using OpenAI API."""
+    try:
+        client = get_openai_client(api_key)
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": """Detect the language of the following text.
+Return a JSON object with a single field 'language' containing the language name in English.
+Example: {"language": "French"}"""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+        )
+        
+        result = json.loads(completion.choices[0].message.content.strip())
+        return result["language"]
+    except Exception as e:
+        logger.error(f"Error detecting language: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error detecting language: {str(e)}")
+
+async def translate_text(text: str, target_language: str) -> str:
+    """Helper function to translate text using OpenAI API."""
+    try:
+        client = get_openai_client(os.getenv('OPENAI_API_KEY'))
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"""Translate the following text to {target_language}.
+Return a JSON object with a single field 'translation' containing only the translation.
+Example: {{"translation": "Hello world"}}"""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+        )
+        
+        result = json.loads(completion.choices[0].message.content.strip())
+        return result["translation"]
+    except Exception as e:
+        logger.error(f"Error translating text: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error translating text: {str(e)}") 

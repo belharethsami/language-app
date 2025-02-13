@@ -18,7 +18,12 @@ import csv
 from io import StringIO
 import random
 import time
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import socket
+import httpcore
+from openai import APIConnectionError, APIError
+from datetime import datetime, timedelta
+from collections import deque
 
 # Load environment variables
 load_dotenv()
@@ -120,13 +125,52 @@ class LanguageValidationRequest(BaseModel):
     text: str
     expected_language: str
 
+class RateLimiter:
+    def __init__(self, max_requests: int, time_window: int):
+        self.max_requests = max_requests
+        self.time_window = time_window  # in seconds
+        self.requests = deque()
+        self._lock = asyncio.Lock()
+    
+    async def acquire(self):
+        async with self._lock:
+            now = datetime.now()
+            
+            # Remove requests older than the time window
+            while self.requests and (now - self.requests[0]) > timedelta(seconds=self.time_window):
+                self.requests.popleft()
+            
+            # If we've hit the limit, wait until we can make another request
+            if len(self.requests) >= self.max_requests:
+                wait_time = (self.requests[0] + timedelta(seconds=self.time_window) - now).total_seconds()
+                if wait_time > 0:
+                    logger.info(f"Rate limit reached. Waiting {wait_time:.2f} seconds...")
+                    await asyncio.sleep(wait_time)
+                    return await self.acquire()
+            
+            # Add the new request
+            self.requests.append(now)
+
+# Create a rate limiter instance (20 requests per 60 seconds)
+rate_limiter = RateLimiter(max_requests=20, time_window=60)
+
 def get_openai_client(api_key: str):
     return OpenAI(api_key=api_key)
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, min=0.5, max=5))
+def is_connection_error(exception):
+    return isinstance(exception, (socket.gaierror, httpcore.ConnectError, APIConnectionError, ConnectionError))
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type((socket.gaierror, httpcore.ConnectError, APIConnectionError, ConnectionError))
+)
 async def make_openai_request(client, model, messages, response_format=None, modalities=None, audio=None):
-    """Helper function to make OpenAI API requests with retry logic."""
+    """Helper function to make OpenAI API requests with retry logic and rate limiting."""
     try:
+        # Acquire rate limit token
+        await rate_limiter.acquire()
+        
         kwargs = {
             "model": model,
             "messages": messages
@@ -140,6 +184,11 @@ async def make_openai_request(client, model, messages, response_format=None, mod
             
         completion = client.chat.completions.create(**kwargs)
         return completion
+    except (socket.gaierror, httpcore.ConnectError, APIConnectionError) as e:
+        logger.error(f"Connection error making OpenAI request: {str(e)}")
+        # Sleep for a moment before retrying
+        time.sleep(2)
+        raise
     except Exception as e:
         logger.error(f"Error making OpenAI request: {str(e)}")
         raise

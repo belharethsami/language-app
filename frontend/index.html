@@ -535,7 +535,10 @@
             <!-- Right Panel - Import & Export Features -->
             <div class="panel" style="display: flex; flex-direction: column;">
                 <div style="flex-grow: 1;">
-                    <button onclick="exportAllToAnki()" class="mb-10">Export All Cards to Anki</button>
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <button onclick="exportAllToAnki()" style="flex: 1;">Export All Cards to Anki</button>
+                        <button onclick="clearCsvCards()" style="flex: 1;">Clear CSV Cards</button>
+                    </div>
                     
                     <input 
                         type="file" 
@@ -868,10 +871,10 @@
 
             const voice = document.getElementById('voice-select').value;
             const audioElement = button.closest('.audio-controls').querySelector('audio');
+            const audioSource = audioElement.querySelector('source');
             const card = button.closest('.card');
             const cardSection = button.closest('.card-section');
             const isTranslation = cardSection.querySelector('strong').textContent.includes(decodeURIComponent(card.dataset.targetLanguage));
-            const language = isTranslation ? decodeURIComponent(card.dataset.targetLanguage) : decodeURIComponent(card.dataset.initialLanguage);
             
             button.disabled = true;
             const originalText = button.textContent;
@@ -887,8 +890,7 @@
                     body: JSON.stringify({ 
                         text: decodeURIComponent(text), 
                         voice,
-                        slow,
-                        language
+                        slow
                     })
                 });
 
@@ -897,9 +899,29 @@
                 }
 
                 const data = await response.json();
-                audioElement.src = `data:audio/wav;base64,${data.audio_data}`;
+                const audioDataUrl = `data:audio/wav;base64,${data.audio_data}`;
+                audioSource.src = audioDataUrl;
+                
+                // Update the download button's onclick handler with new audio data
+                const downloadButton = button.closest('.button-group').querySelector('button:last-child');
+                if (downloadButton) {
+                    const filename = isTranslation ? 'translation_audio.wav' : 'original_audio.wav';
+                    downloadButton.onclick = () => downloadAudioFile(audioDataUrl, filename);
+                }
+                
                 audioElement.load();
                 audioElement.play();
+
+                // Update language display if detected
+                if (data.detected_language) {
+                    const languageDisplay = cardSection.querySelector('strong');
+                    if (languageDisplay) {
+                        languageDisplay.textContent = `${data.detected_language}:`;
+                    }
+                }
+                
+                // Save cards to update the audio data in localStorage
+                saveCards();
             } catch (error) {
                 console.error('Error:', error);
                 alert('Failed to generate audio');
@@ -962,10 +984,20 @@
             }
 
             const voice = document.getElementById('voice-select').value;
-            const generateOriginalAudio = document.getElementById('generate-original-audio').checked;
-            const generateTranslationAudio = document.getElementById('generate-translation-audio').checked;
-            const includeExamples = document.getElementById('include-examples').checked;
             const card = button.closest('.card');
+            
+            // Determine audio preferences from parent card
+            const originalSection = card.querySelector('.card-section:first-child');
+            const translationSection = card.querySelector('.card-section:nth-child(2)');
+            const generateOriginalAudio = !!originalSection.querySelector('.audio-controls');
+            const generateTranslationAudio = !!translationSection.querySelector('.audio-controls');
+            
+            // Keep example sentences preference from checkbox
+            const includeExamples = document.getElementById('include-examples').checked;
+            
+            // Determine which panel the parent card is in
+            const parentPanel = card.closest('.panel');
+            const isRightPanel = parentPanel === document.querySelector('.panel:last-child');
             
             button.disabled = true;
             button.textContent = 'Creating card...';
@@ -1069,7 +1101,13 @@
                         ` : ''}
                     </div>
                 `;
-                document.getElementById('cards-container').insertAdjacentHTML('afterbegin', cardHtml);
+
+                // Insert the new card in the appropriate panel
+                const targetContainer = isRightPanel ? 
+                    parentPanel.querySelector('.csv-cards') || parentPanel : 
+                    document.getElementById('cards-container');
+                
+                targetContainer.insertAdjacentHTML('afterbegin', cardHtml);
                 saveCards();
 
                 // Show success message
@@ -1352,6 +1390,42 @@
             } catch (error) {
                 console.error('Error:', error);
                 alert('Failed to create Anki package: ' + error.message);
+            }
+        }
+
+        // Add new function to detect language
+        async function detectLanguage(text) {
+            const apiKey = localStorage.getItem('openai_api_key');
+            if (!apiKey) {
+                throw new Error('API key is required');
+            }
+
+            const response = await fetch(`${API_URL}/api/detect-language`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-API-Key': apiKey
+                },
+                body: JSON.stringify({ text })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to detect language');
+            }
+
+            const data = await response.json();
+            return data.language;
+        }
+
+        // Add new function to clear CSV cards
+        function clearCsvCards() {
+            if (confirm('Are you sure you want to clear all CSV cards?')) {
+                const rightPanel = document.querySelector('.panel:last-child');
+                const csvCardsContainer = rightPanel.querySelector('.csv-cards');
+                if (csvCardsContainer) {
+                    csvCardsContainer.remove();
+                }
+                saveCards();
             }
         }
     </script>

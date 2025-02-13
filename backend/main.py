@@ -17,6 +17,8 @@ import asyncio
 import csv
 from io import StringIO
 import random
+import time
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 # Load environment variables
 load_dotenv()
@@ -121,6 +123,27 @@ class LanguageValidationRequest(BaseModel):
 def get_openai_client(api_key: str):
     return OpenAI(api_key=api_key)
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, min=0.5, max=5))
+async def make_openai_request(client, model, messages, response_format=None, modalities=None, audio=None):
+    """Helper function to make OpenAI API requests with retry logic."""
+    try:
+        kwargs = {
+            "model": model,
+            "messages": messages
+        }
+        if response_format:
+            kwargs["response_format"] = response_format
+        if modalities:
+            kwargs["modalities"] = modalities
+        if audio:
+            kwargs["audio"] = audio
+            
+        completion = client.chat.completions.create(**kwargs)
+        return completion
+    except Exception as e:
+        logger.error(f"Error making OpenAI request: {str(e)}")
+        raise
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Language Learning API"}
@@ -144,23 +167,53 @@ async def text_to_speech(
         # Initialize client with provided API key
         client = get_openai_client(x_api_key)
         
+        # First detect the language if not provided
+        detected_language = None
+        if not request.language:
+            try:
+                completion = await make_openai_request(
+                    client=client,
+                    model="gpt-4o",
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": """Detect the language of the following text.
+Return a JSON object with a single field 'language' containing the language name in English.
+Example input: "Bonjour le monde"
+Example output: {"language": "French"}"""
+                        },
+                        {
+                            "role": "user",
+                            "content": request.text
+                        }
+                    ]
+                )
+                result = json.loads(completion.choices[0].message.content.strip())
+                detected_language = result["language"]
+                logger.info(f"Detected language: {detected_language}")
+            except Exception as e:
+                logger.error(f"Error detecting language: {str(e)}")
+                detected_language = "Unknown"
+        
         # Set dialect instructions based on language
         dialect_instruction = ""
-        if request.language:
-            if request.language.lower() == "arabic":
-                dialect_instruction = " استخدم لهجة مصرية واضحة. لهجة مصرية أصيلة."  # "Use a clear Egyptian accent. Authentically Egyptian"
+        language = request.language or detected_language
+        if language and language.lower() == "arabic":
+            dialect_instruction = " استخدم لهجة مصرية واضحة. لهجة مصرية أصيلة."
         
         # Generate audio from text using the correct API endpoint
         logger.info("Making API request to OpenAI...")
         
         # Modify system prompt for slow speech if requested
         system_prompt = "You are just going to read the text sent by the user out loud. Do not say or do anything besides precisely the text shown here."
-        if request.language:
-            system_prompt = f"You are just going to read the text sent by the user out loud. The following text is in {request.language}. Do not say or do anything besides precisely the text shown here. Use the correct accent for the given language. {dialect_instruction}"
+        if language and language != "Unknown":
+            system_prompt = f"You are just going to read the text sent by the user out loud. The following text is in {language}. Do not say or do anything besides precisely the text shown here. Use the correct accent for the given language. {dialect_instruction}"
         if request.slow:
             system_prompt += " Speak extremely slowly and clearly, enunciating each word carefully."
         
-        completion = client.chat.completions.create(
+        completion = await make_openai_request(
+            client=client,
             model="gpt-4o-audio-preview",
             modalities=["text", "audio"],
             audio={"voice": request.voice, "format": "wav"},
@@ -183,7 +236,8 @@ async def text_to_speech(
         
         return JSONResponse(content={
             "audio_data": audio_data,
-            "format": "wav"
+            "format": "wav",
+            "detected_language": detected_language
         })
     except ValueError as e:
         logger.error(f"ValueError in text-to-speech: {str(e)}")
@@ -432,11 +486,10 @@ async def generate_card(
         client = get_openai_client(x_api_key)
 
         # 1. First get translation and language detection
-        completion = client.chat.completions.create(
+        completion = await make_openai_request(
+            client=client,
             model="gpt-4o",
-            response_format={
-                "type": "json_object"
-            },
+            response_format={"type": "json_object"},
             messages=[
                 {
                     "role": "system",
@@ -465,11 +518,10 @@ Example response: {{"translated_text": "Hello world", "initial_language": "Frenc
             "example_sentences": None
         }
 
-        # 2. Generate audio in parallel if requested
-        audio_tasks = []
-        
+        # 2. Generate audio if requested
         if request.generate_original_audio:
-            original_audio_completion = client.chat.completions.create(
+            original_audio_completion = await make_openai_request(
+                client=client,
                 model="gpt-4o-audio-preview",
                 modalities=["text", "audio"],
                 audio={"voice": request.voice, "format": "wav"},
@@ -487,7 +539,8 @@ Example response: {{"translated_text": "Hello world", "initial_language": "Frenc
             response_data["original_audio"] = original_audio_completion.choices[0].message.audio.data
 
         if request.generate_translation_audio:
-            translation_audio_completion = client.chat.completions.create(
+            translation_audio_completion = await make_openai_request(
+                client=client,
                 model="gpt-4o-audio-preview",
                 modalities=["text", "audio"],
                 audio={"voice": request.voice, "format": "wav"},
@@ -506,7 +559,8 @@ Example response: {{"translated_text": "Hello world", "initial_language": "Frenc
 
         # 3. Generate example sentences if requested
         if request.include_examples:
-            sentences_completion = client.chat.completions.create(
+            sentences_completion = await make_openai_request(
+                client=client,
                 model="gpt-4o",
                 messages=[
                     {
@@ -586,7 +640,8 @@ async def sentence_to_card(
 
         # Generate audio if requested
         if request.generate_original_audio:
-            original_audio_completion = client.chat.completions.create(
+            original_audio_completion = await make_openai_request(
+                client=client,
                 model="gpt-4o-audio-preview",
                 modalities=["text", "audio"],
                 audio={"voice": request.voice, "format": "wav"},
@@ -604,7 +659,8 @@ async def sentence_to_card(
             response_data["original_audio"] = original_audio_completion.choices[0].message.audio.data
 
         if request.generate_translation_audio:
-            translation_audio_completion = client.chat.completions.create(
+            translation_audio_completion = await make_openai_request(
+                client=client,
                 model="gpt-4o-audio-preview",
                 modalities=["text", "audio"],
                 audio={"voice": request.voice, "format": "wav"},
@@ -623,7 +679,8 @@ async def sentence_to_card(
 
         # Generate example sentences if requested
         if request.include_examples:
-            sentences_completion = client.chat.completions.create(
+            sentences_completion = await make_openai_request(
+                client=client,
                 model="gpt-4o",
                 messages=[
                     {
@@ -755,11 +812,12 @@ async def process_csv(
                 
                 if len(row) >= 2:
                     # Two columns: original and translation
+                    initial_language = await detect_language(row[0].strip(), x_api_key)
                     card_data = await sentence_to_card(
                         SentenceToCardRequest(
                             original_text=row[0].strip(),
                             translated_text=row[1].strip(),
-                            initial_language=await detect_language(row[0].strip(), x_api_key),
+                            initial_language=initial_language,
                             target_language=process_request.target_language,
                             voice=process_request.voice,
                             generate_original_audio=process_request.generate_original_audio,
@@ -809,7 +867,8 @@ async def detect_language(text: str, api_key: str) -> str:
     """Helper function to detect the language of a text using OpenAI API."""
     try:
         client = get_openai_client(api_key)
-        completion = client.chat.completions.create(
+        completion = await make_openai_request(
+            client=client,
             model="gpt-4o",
             response_format={"type": "json_object"},
             messages=[
@@ -830,7 +889,8 @@ Example: {"language": "French"}"""
         return result["language"]
     except Exception as e:
         logger.error(f"Error detecting language: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error detecting language: {str(e)}")
+        # Return a default value instead of raising an error
+        return "Unknown"
 
 async def translate_text(text: str, target_language: str) -> str:
     """Helper function to translate text using OpenAI API."""
@@ -857,4 +917,43 @@ Example: {{"translation": "Hello world"}}"""
         return result["translation"]
     except Exception as e:
         logger.error(f"Error translating text: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error translating text: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error translating text: {str(e)}")
+
+@app.post("/api/detect-language")
+async def detect_language_endpoint(
+    text: str,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+):
+    try:
+        if not x_api_key:
+            raise HTTPException(status_code=401, detail="API key is required")
+
+        if not text.strip():
+            raise ValueError("Text cannot be empty")
+
+        # Initialize client with provided API key
+        client = get_openai_client(x_api_key)
+
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": """Detect the language of the following text.
+Return a JSON object with a single field 'language' containing the language name in English.
+Example input: "Bonjour le monde"
+Example output: {"language": "French"}"""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+        )
+        
+        result = json.loads(completion.choices[0].message.content.strip())
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Error detecting language: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error detecting language: {str(e)}") 
